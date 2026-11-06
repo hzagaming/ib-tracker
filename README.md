@@ -29,11 +29,11 @@ python3 -m http.server 4173 --directory dist
 
 ## GitHub Pages
 
-`.github/workflows/pages.yml` 在每次推送 `main` 时先运行测试，再发布 `dist/`。
+本仓库的 Pages 使用 **Deploy from a branch → main → / (root)**。根目录 `index.html` 自动进入 `dist/` 应用，并保留页面路由与查询参数；`.nojekyll` 保持静态资源原样发布。推送 `main` 后由 GitHub 内置的 Pages 流程发布。
 
-在仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。若首次推送时未启用，在开启后前往 Actions 手动运行 `Test and deploy IB Atlas`。
+`.github/workflows/pages.yml` 独立执行 JavaScript 语法检查与回归测试，不重复创建 Pages 部署。
 
-默认地址为 https://hzagaming.github.io/ib-tracker/ （只有部署成功后才可访问）。发布流程参考 [GitHub 官方指南](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)。
+访问 https://hzagaming.github.io/ib-tracker/ 。发布设置参考 [GitHub 官方指南](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)。
 
 GitHub Pages 发布的是应用代码。个人学习数据仍保存在使用者自己的浏览器中，不会提交到 GitHub。
 
