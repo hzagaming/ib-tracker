@@ -1,7 +1,7 @@
 'use strict';
 const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const today=()=>localDate(new Date());
-const initial=()=>({version:1,profile:{name:'我的',exam:'2028-05-01',weeklyGoal:300},subjects:[],tasks:[],logs:[],grades:[],core:[],topics:[],plans:[],resources:[],reviewHistory:[]});
+const initial=()=>({version:1,profile:{name:'我的',exam:'2028-05-01',weeklyGoal:300},subjects:[],tasks:[],logs:[],grades:[],core:[],topics:[],plans:[],resources:[],reviewHistory:[],mistakes:[]});
 const STORAGE_KEY='ib-atlas-v1';
 let data,storedRaw=null,recoveryRaw=null,storageConflict=false,storageUnavailable=false;
 try {
@@ -13,9 +13,9 @@ try {
   data=initial();
 }
 let page='dashboard',filter='',status='all',subjectFilter='',priorityFilter='',selectedSubject='';
-let undoSnapshot=null,focusDraft=false;
+let undoSnapshot=null,focusDraft=false,profileDirty=false,revertingProfileNavigation=false;
 let calendarMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);
-const nav=[['dashboard','◫','学习总览'],['subjects','▦','我的学科'],['tasks','☑','任务与计划'],['planner','▥','每周学习计划'],['review','↻','复习中心'],['library','▧','学习资料库'],['calendar','▦','截止日期月历'],['logs','▤','学习日志'],['grades','↗','成绩追踪'],['core','◇','核心项目'],['focus','◷','专注时光'],['settings','⚙','个人设置']];
+const nav=[['dashboard','◫','学习总览'],['subjects','▦','我的学科'],['tasks','☑','任务与计划'],['planner','▥','每周学习计划'],['review','↻','复习中心'],['library','▧','学习资料库'],['mistakes','✎','错题本'],['analytics','◴','学习分析'],['search','⌕','搜索记录'],['calendar','▦','截止日期月历'],['logs','▤','学习日志'],['grades','↗','成绩追踪'],['core','◇','核心项目'],['focus','◷','专注时光'],['settings','⚙','个人设置']];
 const groups=[['语言与文学','Chinese A: Literature','Chinese A: Language and Literature','English A: Literature','English A: Language and Literature','Language A: Literature（自选语言）','Language A: Language and Literature（自选语言）','Literature and Performance'],['语言习得','English B','Chinese B','French B','Spanish B','French ab initio','Spanish ab initio','Language B（自选语言）','Language ab initio（自选语言）','Latin','Classical Greek'],['个体与社会','Economics','Business Management','History','Geography','Psychology','Global Politics','Digital Society','Philosophy','Social and Cultural Anthropology','World Religions'],['科学','Biology','Chemistry','Physics','Computer Science','Design Technology','Sports, Exercise and Health Science','Environmental Systems and Societies'],['数学','Mathematics: Analysis and Approaches','Mathematics: Applications and Interpretation'],['艺术','Visual Arts','Music','Theatre','Film','Dance']];
 function save({recover=false}={}) {
   if(recoveryRaw!==null&&!recover){toast('原有数据无法读取，请先导出恢复文件或导入有效备份。');return false}
@@ -83,20 +83,23 @@ if(page==='calendar')html=calendarView();
 if(page==='planner')html=plannerView();
 if(page==='review')html=reviewView();
 if(page==='library')html=libraryView();
+if(page==='mistakes')html=mistakesView();
+if(page==='analytics')html=analyticsView();
+if(page==='search')html=globalSearchView();
 if(page==='subjects')html=head('我的学科','覆盖六大学科组。按你的实际选课添加课程，点击卡片进入科目工作台，管理知识点与复习。','添加学科','subjects')+`<div class="panel"><span class="tag">${data.subjects.filter(s=>s.level==='HL').length} HL</span> <span class="tag blue">${data.subjects.filter(s=>s.level==='SL').length} SL</span><p class="sub">通常选择六门课程。课程设置和考核要求请以学校及对应考试届次指南为准。</p></div><div class="subjects">${subjectCards()||empty('你的课程，由你定义','点击右上角添加第一门学科。')}</div>`+groups.map((g,i)=>`<div class="panel" style="margin-bottom:12px"><h3>0${i+1} · ${g[0]}</h3><p class="sub">${g.slice(1).map(esc).join(' · ')}</p></div>`).join('')+`<p class="sub">上方为常见课程示例，添加时支持自定义名称。课程结构参考 <a href="https://www.ibo.org/programmes/diploma-programme/curriculum/" target="_blank" rel="noopener">IB 官方课程目录 ↗</a>。</p>`;
 if(page==='tasks')html=head('任务与计划','让作业、复习与重要截止日期，各有着落。','添加任务','tasks')+taskTabs()+filters(true)+`<div id="result-summary" class="result-summary"></div><div class="panel" id="list"></div>`;
 if(page==='logs')html=head('学习日志','记录知识，也记录你如何理解它。','记录学习','logs')+filters()+`<div class="panel" id="list"></div>`;
-if(page==='grades')html=head('成绩追踪','每一次测评，都是调整学习方向的线索。','记录成绩','grades')+`<div class="stats"><div class="stat"><span class="stat-label">测评记录</span><strong>${data.grades.length}</strong></div><div class="stat"><span class="stat-label">平均等级</span><strong>${data.grades.length?(data.grades.reduce((n,g)=>n+g.score,0)/data.grades.length).toFixed(1):'—'}</strong></div><div class="stat"><span class="stat-label">最新记录</span><strong>${data.grades.length?data.grades.slice().sort((a,b)=>b.date.localeCompare(a.date))[0].score:'—'} <small>/ 7</small></strong></div><div class="stat"><span class="stat-label">用途</span><p class="sub">用于个人复盘<br>非官方预估成绩</p></div></div>`+gradeSummary()+filters()+`<div class="panel" id="list"></div>`;
+if(page==='grades')html=head('成绩追踪','每一次测评，都是调整学习方向的线索。','记录成绩','grades')+`<div class="stats"><div class="stat"><span class="stat-label">测评记录</span><strong>${data.grades.length}</strong></div><div class="stat"><span class="stat-label">平均等级</span><strong>${data.grades.length?(data.grades.reduce((n,g)=>n+g.score,0)/data.grades.length).toFixed(1):'—'}</strong></div><div class="stat"><span class="stat-label">最新记录</span><strong>${data.grades.length?data.grades.slice().reverse().sort((a,b)=>b.date.localeCompare(a.date))[0].score:'—'} <small>/ 7</small></strong></div><div class="stat"><span class="stat-label">用途</span><p class="sub">用于个人复盘<br>非官方预估成绩</p></div></div>`+gradeSummary()+filters()+`<div class="panel" id="list"></div>`;
 if(page==='core')html=head('核心项目','研究、思考、行动。把长期项目拆成看得见的进展。','添加记录','core')+`<div class="core-grid">${[['EE','Extended Essay','从研究问题到最终论文，记录每个研究阶段。'],['TOK','Theory of Knowledge','收集知识问题、展览构思与论文反思。'],['CAS','Creativity · Activity · Service','记录经历、行动、反思与学习成果。']].map(([t,n,d])=>{const list=data.core.filter(x=>x.type===t),done=list.filter(x=>x.stage==='已完成').length;return `<section class="panel core-card"><div class="number">${t}</div><h3>${n}</h3><p class="sub">${d}</p><div class="progress"><i style="width:${list.length?done/list.length*100:0}%"></i></div><p class="sub">${done} / ${list.length} 个阶段完成</p></section>`}).join('')}</div><div class="section-title"><h2>项目与阶段 · 包含 IA</h2><span class="tag">${data.core.length} 条记录</span></div><div class="panel">${data.core.length?data.core.map(x=>recordRow(x,'core')).join(''):empty('从一个研究问题开始','添加 IA、EE、TOK 或 CAS 的阶段目标与反思。')}</div>`;
 if(page==='focus')html=head('专注时光','留出一段完整的时间，做一件值得的事。')+`<div class="panel timer"><div class="eyebrow">ONE THING AT A TIME</div><div class="focus-orbit"><div id="timer-display"></div></div><p class="sub">25 分钟专注 · 结束后可保存为学习日志</p><button class="primary" id="timer-start"></button><button class="outline" id="timer-reset">重置</button><button class="outline" id="timer-save">保存已专注时间</button></div>`;
 if(page==='settings')html=head('个人设置','让这个空间更像你自己。')+`<div class="grid"><section class="panel"><h2>我的学习档案</h2><form id="profile-form">${field('你的名字','name','text',data.profile.name,'required maxlength="40"')}${field('目标考试日期','exam','date',data.profile.exam,'required')}${field('每周学习目标（分钟）','weeklyGoal','number',data.profile.weeklyGoal??300,'required min="1" max="10080"')}<button class="primary" style="margin-top:20px">保存设置</button></form></section><section class="panel"><h2>数据与备份</h2><p class="sub">数据保存在当前设备的浏览器中。清除浏览器数据、切换设备或网址不会自动同步。请定期导出备份。</p><div class="actions" style="justify-content:flex-start"><button class="outline" id="export-settings">导出 JSON</button><button class="outline" id="import">导入备份</button><input type="file" id="import-file" accept="application/json" hidden></div><p class="sub">导入前会确认，导入将替换当前数据。</p><div style="margin-top:35px"><h3>移除学科</h3>${data.subjects.map(s=>`<div class="row"><span class="row-body">${esc(s.name)}</span><button class="delete" data-delete="subjects:${s.id}" aria-label="删除科目">×</button></div>`).join('')||'<p class="sub">暂无学科</p>'}</div></section></div>`;
-$('#app').innerHTML=html;bind();if(['tasks','logs','grades'].includes(page))renderList();if(page==='focus')paintTimer();bindEnhancements();bindUX();bindStudy();renderNotices()}
+$('#app').innerHTML=html;bind();if(['tasks','logs','grades'].includes(page))renderList();if(page==='focus')paintTimer();bindEnhancements();bindUX();bindStudy();bindInsights();renderNotices()}
 function weekChart(){let vals=[];for(let i=6;i>=0;i--){let d=new Date();d.setDate(d.getDate()-i);let key=localDate(d);vals.push([d.getDate(),data.logs.filter(l=>l.date===key).reduce((n,l)=>n+l.minutes,0)])}let max=Math.max(60,...vals.map(x=>x[1]));return `<div class="week">${vals.map(([d,m])=>`<div class="day" title="${m} 分钟"><div class="bar" style="height:${Math.max(3,m/max*70)}px"></div>${d}日</div>`).join('')}</div>`}
 function filters(task=false){return `<div class="filters"><input id="search" placeholder="搜索${task?'任务':'记录'}或科目…" value="${esc(filter)}" aria-label="搜索记录"><select id="subject-filter" aria-label="筛选科目"><option value="">全部科目</option>${data.subjects.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>${task?`<select id="priority-filter" aria-label="筛选优先级"><option value="">全部优先级</option><option>普通</option><option>重要</option><option>紧急</option></select><select id="status" aria-label="任务状态"><option value="all">全部任务</option><option value="pending">待完成</option><option value="done">已完成</option><option value="today">今天</option><option value="week">近 7 天</option><option value="overdue">已逾期</option></select>`:''}</div>`}
 function recordRow(x,kind){return `<div class="row"><div class="row-body"><a href="#" data-edit="${kind}:${x.id}" class="row-title">${esc(x.title)}</a><small>${esc(subjectName(x.subject))} · ${esc(x.date)} ${kind==='logs'?'· '+x.minutes+' 分钟':''}</small>${x.notes?`<details class="note-details"><summary>查看笔记与反馈</summary><div class="note">${esc(x.notes)}</div></details>`:''}${x.raw?`<small>原始分数 ${esc(x.raw)}</small>`:''}</div><span class="tag ${kind==='grades'?'blue':''}">${kind==='grades'?x.score+' / 7':esc(x.stage||'学习日志')}</span>${kind==='core'?`<span class="tag blue">${esc(x.type)}</span>`:''}<button class="delete" data-delete="${kind}:${x.id}" aria-label="删除记录">×</button></div>`}
-function renderList(){let items=data[page].filter(x=>(x.title+' '+subjectName(x.subject)).toLowerCase().includes(filter.toLowerCase()));if(subjectFilter)items=items.filter(x=>x.subject===subjectFilter);if(page==='tasks'&&priorityFilter)items=items.filter(x=>x.priority===priorityFilter);if(page==='tasks')items=filterTasks(items,status);items.sort((a,b)=>page==='tasks'?a.date.localeCompare(b.date):b.date.localeCompare(a.date));if($('#result-summary'))$('#result-summary').innerHTML=`<span>显示 ${items.length} / ${data[page].length} 条记录</span>${filter||subjectFilter||priorityFilter||status!=='all'?'<button class="text-button" id="clear-filters">清除筛选 ×</button>':''}`;$('#list').innerHTML=page==='tasks'?(items.length?taskRows(items):empty(data.tasks.length?'没有符合条件的任务':'今天，从一件小事开始',data.tasks.length?'试试更改条件，或清除筛选。':'点击「添加任务」，安排下一步。')):items.map(x=>recordRow(x,page)).join('')||empty('还没有记录','添加你的第一条记录，从今天开始积累。');bindRows();if($('#clear-filters'))$('#clear-filters').onclick=()=>{filter='';subjectFilter='';priorityFilter='';status='all';render()}}
+function renderList(){let items=data[page].filter(x=>(x.title+' '+subjectName(x.subject)).toLowerCase().includes(filter.toLowerCase()));if(subjectFilter)items=items.filter(x=>x.subject===subjectFilter);if(page==='tasks'&&priorityFilter)items=items.filter(x=>x.priority===priorityFilter);if(page==='tasks')items=filterTasks(items,status);if(page!=='tasks')items.reverse();items.sort((a,b)=>page==='tasks'?a.date.localeCompare(b.date):b.date.localeCompare(a.date));if($('#result-summary'))$('#result-summary').innerHTML=`<span>显示 ${items.length} / ${data[page].length} 条记录</span>${filter||subjectFilter||priorityFilter||status!=='all'?'<button class="text-button" id="clear-filters">清除筛选 ×</button>':''}`;$('#list').innerHTML=page==='tasks'?(items.length?taskRows(items):empty(data.tasks.length?'没有符合条件的任务':'今天，从一件小事开始',data.tasks.length?'试试更改条件，或清除筛选。':'点击「添加任务」，安排下一步。')):items.map(x=>recordRow(x,page)).join('')||empty('还没有记录','添加你的第一条记录，从今天开始积累。');bindRows();if($('#clear-filters'))$('#clear-filters').onclick=()=>{filter='';subjectFilter='';priorityFilter='';status='all';render()}}
 function bindRows(){document.querySelectorAll('[data-edit]').forEach(el=>{el.onclick=e=>{e.preventDefault();let[k,id]=el.dataset.edit.split(':');add(k,id)};if(el.tagName==='ARTICLE')el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();el.click()}}});document.querySelectorAll('[data-delete]').forEach(el=>el.onclick=()=>{const[k,id]=el.dataset.delete.split(':');deleteRecord(k,id)});document.querySelectorAll('[data-check]').forEach(el=>el.onchange=()=>{mutate(()=>{data.tasks.find(t=>t.id===el.dataset.check).done=el.checked});render()})}
-function bind(){document.querySelectorAll('[data-add]').forEach(el=>el.onclick=()=>add(el.dataset.add));bindRows();if($('#search'))$('#search').oninput=e=>{filter=e.target.value;renderList()};if($('#status')){$('#status').value=status;$('#status').onchange=e=>{status=e.target.value;render()}}if($('#profile-form'))$('#profile-form').onsubmit=e=>{e.preventDefault();if(mutate(()=>{const v=Object.fromEntries(new FormData(e.target));data.profile={name:v.name.trim(),exam:v.exam,weeklyGoal:Number(v.weeklyGoal||300)}}))toast('档案已更新')};if($('#export-settings'))$('#export-settings').onclick=backup;if($('#import')){$('#import').onclick=()=>$('#import-file').click();$('#import-file').onchange=importData}if($('#timer-start')){$('#timer-start').onclick=()=>{if(timer.running){timer.remaining=Math.max(0,Math.ceil((timer.end-Date.now())/1000));timer.running=false}else{timer.end=Date.now()+timer.remaining*1000;timer.running=true}persistTimer();paintTimer()};$('#timer-reset').onclick=()=>{resetTimer();paintTimer()};$('#timer-save').onclick=()=>{const remaining=timer.running?Math.max(0,Math.ceil((timer.end-Date.now())/1000)):timer.remaining;const m=Math.floor((1500-remaining)/60);if(m<1)return toast('专注满 1 分钟后即可保存');timer.remaining=remaining;timer.running=false;persistTimer();add('logs');focusDraft=true;$('#f-title').value='专注学习';$('#f-minutes').value=m;paintTimer()}}}
+function bind(){document.querySelectorAll('[data-add]').forEach(el=>el.onclick=()=>add(el.dataset.add));bindRows();if($('#search'))$('#search').oninput=e=>{filter=e.target.value;renderList()};if($('#status')){$('#status').value=status;$('#status').onchange=e=>{status=e.target.value;render()}}if($('#profile-form'))$('#profile-form').oninput=()=>{profileDirty=true};if($('#profile-form'))$('#profile-form').onsubmit=e=>{e.preventDefault();if(mutate(()=>{const v=Object.fromEntries(new FormData(e.target));data.profile={name:v.name.trim(),exam:v.exam,weeklyGoal:Number(v.weeklyGoal||300)}})){profileDirty=false;toast('档案已更新')}};if($('#export-settings'))$('#export-settings').onclick=backup;if($('#import')){$('#import').onclick=()=>$('#import-file').click();$('#import-file').onchange=importData}if($('#timer-start')){$('#timer-start').onclick=()=>{if(timer.running){timer.remaining=Math.max(0,Math.ceil((timer.end-Date.now())/1000));timer.running=false}else{timer.end=Date.now()+timer.remaining*1000;timer.running=true}persistTimer();paintTimer()};$('#timer-reset').onclick=()=>{resetTimer();paintTimer()};$('#timer-save').onclick=()=>{const remaining=timer.running?Math.max(0,Math.ceil((timer.end-Date.now())/1000)):timer.remaining;const m=Math.floor((1500-remaining)/60);if(m<1)return toast('专注满 1 分钟后即可保存');timer.remaining=remaining;timer.running=false;persistTimer();add('logs');focusDraft=true;$('#f-title').value='专注学习';$('#f-minutes').value=m;paintTimer()}}}
 function backup(){const raw=recoveryRaw??JSON.stringify(data,null,2);const blob=new Blob([raw],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=(recoveryRaw!==null?'ib-atlas-recovery-':'ib-atlas-')+today()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('备份已导出')}
 async function importData(e) {
   const input=e.target;
@@ -107,7 +110,7 @@ async function importData(e) {
     if(!confirm('导入将替换当前数据。建议先导出备份。继续导入？'))return;
     const before=data;data=next;
     if(!save({recover:true})){data=before;return}
-    undoSnapshot=null;focusDraft=false;resetTimer();render();toast('备份已恢复');
+    undoSnapshot=null;focusDraft=false;profileDirty=false;resetTimer();render();toast('备份已恢复');
   } catch(err) {toast('导入失败：'+err.message)}
   finally {input.value=''}
 }
@@ -130,12 +133,12 @@ function validate(d) {
   const checkId=x=>{if(!x||!id(x.id)||ids.has(x.id))throw Error('记录 ID 无效或重复');ids.add(x.id)};
   for(const s of d.subjects){
     checkId(s);
-    if(!text(s.name,100,true)||!levels.includes(s.level)||!Number.isInteger(+s.group)||+s.group<0||+s.group>5||!Number.isInteger(s.progress)||s.progress<0||s.progress>100||!Number.isInteger(s.target)||s.target<1||s.target>7||!optionalText(s.notes,100000))throw Error('科目名称、等级或进度不正确');
+    if(!text(s.name,100,true)||!levels.includes(s.level)||!((typeof s.group==='string'&&/^[0-5]$/.test(s.group))||(Number.isInteger(s.group)&&s.group>=0&&s.group<=5))||!Number.isInteger(s.progress)||s.progress<0||s.progress>100||!Number.isInteger(s.target)||s.target<1||s.target>7||!optionalText(s.notes,100000))throw Error('科目名称、等级或进度不正确');
   }
   for(const key of ['tasks','logs','grades','core'])for(const x of d[key]){
     checkId(x);
     if(!text(x.title,180,true)||!validDate(x.date)||!optionalText(x.notes,100000)||typeof x.subject!=='string'||(x.subject!==''&&!subjectIds.has(x.subject)))throw Error('记录名称、日期或关联科目不正确');
-    if(key==='tasks'&&(typeof x.done!=='boolean'||!['普通','重要','紧急'].includes(x.priority)||!types.includes(x.type)))throw Error('任务状态、优先级或类别不正确');
+    if(key==='tasks'&&((x.mistakeId!==undefined&&!id(x.mistakeId))||typeof x.done!=='boolean'||!['普通','重要','紧急'].includes(x.priority)||!types.includes(x.type)))throw Error('任务状态、优先级或类别不正确');
     if(key==='logs'&&((x.planId!==undefined&&!id(x.planId))||!Number.isInteger(x.minutes)||x.minutes<1||x.minutes>1440||(x.focusSession!==undefined&&!id(x.focusSession))))throw Error('学习时长须为 1–1440 的整数');
     if(key==='grades'&&(!Number.isInteger(x.score)||x.score<1||x.score>7||!optionalText(x.raw,100)))throw Error('成绩须为 1–7 的整数');
     if(key==='core'&&(!['IA','EE','TOK','CAS'].includes(x.type)||!['未开始','进行中','待反馈','已完成'].includes(x.stage)))throw Error('核心项目类别或进度不正确');
@@ -152,13 +155,13 @@ function decodeData(raw) {
   const d=JSON.parse(raw);
   // Older backups may predate topics or contain records whose subject was removed.
   if(d&&typeof d==='object'){
-    d.topics??=[];d.plans??=[];d.resources??=[];d.reviewHistory??=[];
+    d.topics??=[];d.plans??=[];d.resources??=[];d.reviewHistory??=[];d.mistakes??=[];
     const ids=new Set(Array.isArray(d.subjects)?d.subjects.map(s=>s?.id):[]);
-    for(const key of ['tasks','logs','grades','core','plans','resources','reviewHistory'])if(Array.isArray(d[key]))for(const x of d[key])if(x&&typeof x.subject==='string'&&!ids.has(x.subject))x.subject='';
+    for(const key of ['tasks','logs','grades','core','plans','resources','reviewHistory','mistakes'])if(Array.isArray(d[key]))for(const x of d[key])if(x&&typeof x.subject==='string'&&!ids.has(x.subject))x.subject='';
   }
   validate(d);return d;
 }
-let timer=restoreTimer();function paintTimer(){if(!$('#timer-display'))return;const s=timer.running?Math.max(0,Math.ceil((timer.end-Date.now())/1000)):timer.remaining;$('#timer-display').textContent=String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');$('#timer-start').textContent=timer.running?'暂停专注':s===0?'已完成':'开始专注';$('#timer-start').disabled=s===0}setInterval(()=>{if(timer.running&&Date.now()>=timer.end){timer.running=false;timer.remaining=0;persistTimer();toast('本次专注已完成！可以保存到学习日志。')}paintTimer()},500);$('#backup').onclick=backup;window.addEventListener('hashchange',()=>{document.body?.classList.remove('menu-open');$('#menu-toggle')?.setAttribute('aria-expanded','false');filter='';status='all';subjectFilter='';priorityFilter='';render()});render();
+let timer=restoreTimer();function paintTimer(){if(!$('#timer-display'))return;const s=timer.running?Math.max(0,Math.ceil((timer.end-Date.now())/1000)):timer.remaining;$('#timer-display').textContent=String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');$('#timer-start').textContent=timer.running?'暂停专注':s===0?'已完成':'开始专注';$('#timer-start').disabled=s===0}setInterval(()=>{if(timer.running&&Date.now()>=timer.end){timer.running=false;timer.remaining=0;persistTimer();toast('本次专注已完成！可以保存到学习日志。')}paintTimer()},500);$('#backup').onclick=backup;window.addEventListener('hashchange',()=>{if(revertingProfileNavigation){revertingProfileNavigation=false;return}if(profileDirty&&page==='settings'&&location.hash!=='#settings'){if(!confirm('档案还有未保存的修改，确定离开？')){revertingProfileNavigation=true;location.hash='#settings';return}profileDirty=false}document.body?.classList.remove('menu-open');$('#menu-toggle')?.setAttribute('aria-expanded','false');filter='';status='all';subjectFilter='';priorityFilter='';render()});render();
 
 
 // Subject workspaces, topic revision and calendar views.
@@ -184,15 +187,15 @@ function subjectDetail() {
   if (!s) return head('没有找到这门科目', '<a href="#subjects">返回我的学科 ↗</a>');
   const topics = data.topics.filter(t => t.subject === s.id);
   const logs = data.logs.filter(l => l.subject === s.id);
-  const grades = data.grades.filter(g => g.subject === s.id).sort((a,b)=>b.date.localeCompare(a.date));
+  const grades = data.grades.filter(g => g.subject === s.id).reverse().sort((a,b)=>b.date.localeCompare(a.date));
   const tasks = data.tasks.filter(t => t.subject === s.id && !t.done).sort((a,b)=>a.date.localeCompare(b.date));
   return head(esc(s.name), `${s.level} · ${groups[s.group][0]} · 目标 ${s.target} / 7`) +
-    `<div class="toolbar"><a class="outline button-link" href="#subjects">← 全部学科</a><button data-edit="subjects:${s.id}">编辑学科与笔记</button><button class="primary" id="add-topic">＋ 添加知识点</button><button data-study-quick="logs" data-study-subject="${s.id}">记录学习</button><button data-study-quick="grades" data-study-subject="${s.id}">记录成绩</button><button data-study-quick="plan" data-study-subject="${s.id}">安排学习</button><button data-study-quick="resource" data-study-subject="${s.id}">收藏资料</button></div>
+    `<div class="toolbar"><a class="outline button-link" href="#subjects">← 全部学科</a><button data-edit="subjects:${s.id}">编辑学科与笔记</button><button class="primary" id="add-topic">＋ 添加知识点</button><button data-study-quick="logs" data-study-subject="${s.id}">记录学习</button><button data-study-quick="grades" data-study-subject="${s.id}">记录成绩</button><button data-study-quick="plan" data-study-subject="${s.id}">安排学习</button><button data-study-quick="resource" data-study-subject="${s.id}">收藏资料</button><button data-mistake-subject="${s.id}">记录错题</button></div>
     <div class="stats"><div class="stat"><span class="stat-label">掌握进度</span><strong>${subjectProgress(s)}%</strong><small>${topics.length ? '根据知识点掌握状态计算' : '添加知识点后自动计算'}</small></div><div class="stat"><span class="stat-label">已掌握知识点</span><strong>${topics.filter(t=>t.status==='mastered').length} <small>/ ${topics.length}</small></strong></div><div class="stat"><span class="stat-label">累计学习</span><strong>${(logs.reduce((n,l)=>n+l.minutes,0)/60).toFixed(1)} <small>小时</small></strong></div><div class="stat"><span class="stat-label">最近成绩</span><strong>${grades[0]?.score || '—'} <small>/ 7</small></strong></div></div>
     <section class="panel"><div class="panel-head"><h2>知识点与复习清单</h2><span class="tag">${topics.filter(t=>scheduledReview(t)&&t.review<=today()).length} 项到期复习</span></div>
     ${topics.map(t=>`<div class="row"><div class="row-body"><a href="#" data-topic="${t.id}">${esc(t.title)}</a>${t.review?`<small>下次复习 · ${esc(t.review)}</small>`:''}${t.notes?`<div class="note">${esc(t.notes)}</div>`:''}</div><select class="topic-status" data-topic-status="${t.id}" aria-label="${esc(t.title)}掌握状态">${[['new','未开始'],['learning','学习中'],['review','待复习'],['mastered','已掌握']].map(([v,n])=>`<option value="${v}" ${t.status===v?'selected':''}>${n}</option>`).join('')}</select><button class="delete" data-delete="topics:${t.id}" aria-label="删除知识点">×</button></div>`).join('') || empty('把课程拆成一个个小目标', '添加章节、知识点或错题，标记掌握状态并安排复习。')}</section>
     <div class="grid" style="margin-top:22px"><section class="panel"><div class="panel-head"><h2>待办任务</h2><button class="text-button" id="subject-task">＋ 添加</button></div>${taskRows(tasks)}</section><section class="panel"><h2>学科笔记</h2><div class="note">${esc(s.notes) || '点击「编辑学科与笔记」写下你的复习重点。'}</div></section></div>
-    <div class="grid"><section class="panel"><h2>最近学习</h2>${logs.slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5).map(x=>recordRow(x,'logs')).join('') || empty('还没有学习记录','学习后，留下一点收获。')}</section><section class="panel"><h2>成绩与反馈</h2>${grades.slice(0,5).map(x=>recordRow(x,'grades')).join('') || empty('还没有测评记录','记录真实成绩与改进方向。')}</section></div>`;
+    <div class="grid"><section class="panel"><h2>最近学习</h2>${logs.slice().reverse().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5).map(x=>recordRow(x,'logs')).join('') || empty('还没有学习记录','学习后，留下一点收获。')}</section><section class="panel"><h2>成绩与反馈</h2>${grades.slice(0,5).map(x=>recordRow(x,'grades')).join('') || empty('还没有测评记录','记录真实成绩与改进方向。')}</section></div>`;
 }
 function calendarView() {
   const year=calendarMonth.getFullYear(), month=calendarMonth.getMonth();
@@ -278,7 +281,7 @@ function deleteRecord(kind,id) {
   if(kind==='subjects'){
     undo.topics=data.topics.filter(t=>t.subject===id);
     data.topics=data.topics.filter(t=>t.subject!==id);
-    for(const key of ['tasks','logs','grades','core','plans','resources','reviewHistory'])for(const x of data[key])if(x.subject===id){undo.links.push([key,x.id]);x.subject=''}
+    for(const key of ['tasks','logs','grades','core','plans','resources','reviewHistory','mistakes'])for(const x of data[key])if(x.subject===id){undo.links.push([key,x.id]);x.subject=''}
   }
   if(!save()){data=JSON.parse(snapshot);return}
   undoSnapshot=undo;render();toast('记录已移除',undoDelete);
@@ -339,7 +342,7 @@ function renderNotices() {
   if(recoveryRaw!==null){
     box.innerHTML='<div class="data-notice"><strong>已有数据暂时无法读取，原文件仍保留。</strong><p>请先导出恢复文件，再导入有效备份。当前空白界面不会覆盖原数据。</p><button id="recovery-export">导出恢复文件</button><a href="#settings">导入备份 →</a><button id="recovery-reset">清空并重新开始</button></div>';
     $('#recovery-export').onclick=backup;
-    $('#recovery-reset').onclick=()=>{if(!confirm('此操作将清空当前浏览器无法读取的记录。请先导出恢复文件。确定重新开始？'))return;const before=data;data=initial();if(!save({recover:true})){data=before;return}undoSnapshot=null;resetTimer();render();toast('已建立新的学习空间')};
+    $('#recovery-reset').onclick=()=>{if(!confirm('此操作将清空当前浏览器无法读取的记录。请先导出恢复文件。确定重新开始？'))return;const before=data;data=initial();if(!save({recover:true})){data=before;return}undoSnapshot=null;profileDirty=false;resetTimer();render();toast('已建立新的学习空间')};
   } else if(storageConflict) {
     box.innerHTML='<div class="data-notice"><strong>另一个标签页更新了学习记录。</strong><p>为保留最新记录，当前修改尚未保存。载入后请重新编辑。</p><button id="reload-records">载入最新记录</button></div>';
     $('#reload-records').onclick=()=>reloadStoredData(true);
@@ -348,17 +351,17 @@ function renderNotices() {
   } else box.innerHTML='';
 }
 function reloadStoredData(ask=false) {
-  if(ask&&$('#modal').open&&!confirm('载入最新记录会关闭当前未保存的表单，继续？'))return false;
+  if(ask&&($('#modal').open||profileDirty)&&!confirm('载入最新记录会关闭当前未保存的表单，继续？'))return false;
   try {
     const raw=localStorage.getItem(STORAGE_KEY)??null;
     const next=raw===null?initial():decodeData(raw);
     data=next;storedRaw=raw;recoveryRaw=null;storageConflict=false;storageUnavailable=false;
-    undoSnapshot=null;focusDraft=false;$('#modal').close();render();return true;
+    undoSnapshot=null;focusDraft=false;profileDirty=false;$('#modal').close();render();return true;
   } catch {storageConflict=true;renderNotices();toast('最新数据无法读取，未覆盖当前记录。');return false}
 }
 window.addEventListener('storage',e=>{
   if(e.key===STORAGE_KEY||e.key===null){
-    if($('#modal').open||recoveryRaw!==null){storageConflict=true;renderNotices()}
+    if($('#modal').open||profileDirty||recoveryRaw!==null){storageConflict=true;renderNotices()}
     else reloadStoredData();
   }
   if(e.key==='ib-atlas-timer'||e.key===null){
@@ -366,3 +369,4 @@ window.addEventListener('storage',e=>{
     if(focusDraft){focusDraft=false;$('#modal').close();toast('专注状态已在另一标签页更新，请重新确认已记录时长。')}
   }
 });
+document.addEventListener?.('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key?.toLowerCase()==='k'&&!$('#modal').open){e.preventDefault();openGlobalSearch()}});

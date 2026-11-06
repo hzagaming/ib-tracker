@@ -14,6 +14,7 @@ const STUDY_GUIDES=[
 function validateStudy(d,ids,subjectIds) {
   const text=(v,max,required=false)=>typeof v==='string'&&v.length<=max&&(!required||v.trim().length>0);
   const id=v=>typeof v==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(v);
+  validateInsights(d,ids,subjectIds);
   if(d.profile.weeklyGoal!==undefined&&(!Number.isInteger(d.profile.weeklyGoal)||d.profile.weeklyGoal<1||d.profile.weeklyGoal>10080))throw Error('每周目标须为 1–10080 分钟');
   for(const key of ['plans','resources','reviewHistory']){
     const list=d[key]??[];
@@ -22,8 +23,8 @@ function validateStudy(d,ids,subjectIds) {
       if(!x||!id(x.id)||ids.has(x.id)||typeof x.subject!=='string'||(x.subject!==''&&!subjectIds.has(x.subject)))throw Error('学习记录 ID 或科目不正确');
       ids.add(x.id);
       if(!text(x.title,180,true)||!text(x.notes??'',100000))throw Error('学习记录名称或笔记不正确');
-      if(key==='plans'&&(!validDate(x.date)||!Number.isInteger(x.minutes)||x.minutes<1||x.minutes>480||typeof x.done!=='boolean'||(x.time!==''&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(x.time))))throw Error('计划日期、时间或时长不正确');
-      if(key==='resources'&&(!['笔记','题目','文章','视频','其他'].includes(x.kind)||typeof x.favorite!=='boolean'||typeof x.url!=='string'||(x.url!==''&&!safeResourceURL(x.url))||(!x.url&&!x.notes)||!text(x.url,2000)))throw Error('资料需要有效的网址或笔记，仅支持 HTTP / HTTPS 链接');
+      if(key==='plans'&&(!validDate(x.date)||!Number.isInteger(x.minutes)||x.minutes<1||x.minutes>480||typeof x.done!=='boolean'||typeof x.time!=='string'||(x.time!==''&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(x.time))))throw Error('计划日期、时间或时长不正确');
+      if(key==='resources'&&(!['笔记','题目','文章','视频','其他'].includes(x.kind)||typeof x.favorite!=='boolean'||typeof x.url!=='string'||(x.url!==''&&!safeResourceURL(x.url))||(!x.url&&!(x.notes??'').trim())||!text(x.url,2000)))throw Error('资料需要有效的网址或笔记，仅支持 HTTP / HTTPS 链接');
       if(key==='reviewHistory'&&(!id(x.topic)||!validDate(x.date)||!['again','okay','good'].includes(x.rating)||!Number.isInteger(x.interval)||x.interval<1||x.interval>90))throw Error('复习记录格式不正确');
     }
   }
@@ -117,7 +118,7 @@ function bindResourceRows() {
 }
 function studyDashboard() {
   const plans=data.plans.filter(p=>p.date===today()&&!p.done).sort((a,b)=>a.time.localeCompare(b.time));
-  return `<div class="study-shortcuts"><a href="#planner"><span>▥</span><strong>每周计划</strong><small>今天 ${plans.length} 段待学习</small></a><a href="#review"><span>↻</span><strong>复习中心</strong><small>回想 · 核对 · 再安排</small></a><a href="#library"><span>▧</span><strong>学习资料库</strong><small>${data.resources.length} 份资料与工作卡</small></a></div>`;
+  return `<div class="study-shortcuts"><a href="#planner"><span>▥</span><strong>每周计划</strong><small>今天 ${plans.length} 段待学习</small></a><a href="#review"><span>↻</span><strong>复习中心</strong><small>回想 · 核对 · 再安排</small></a><a href="#library"><span>▧</span><strong>学习资料库</strong><small>${data.resources.length} 份资料与工作卡</small></a><a href="#mistakes"><span>✎</span><strong>错题本</strong><small>${data.mistakes.filter(m=>m.status!=='已掌握').length} 道题待回顾</small></a><a href="#analytics"><span>◴</span><strong>学习分析</strong><small>看见投入、分布与变化</small></a><a href="#search"><span>⌕</span><strong>搜索记录</strong><small>Ctrl / ⌘ K 快速打开</small></a></div>`;
 }
 function bindStudy() {
   document.querySelectorAll('[data-study-add]').forEach(el=>el.onclick=()=>studyEditor(el.dataset.studyAdd));

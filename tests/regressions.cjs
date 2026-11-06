@@ -201,3 +201,69 @@ test('removing a subject preserves and restores plans, resources and review hist
   a.run(`deleteRecord('subjects',${JSON.stringify(id)})`);assert.equal(a.run('data.plans[0].subject'),'');assert.equal(a.run('data.resources[0].subject'),'');assert.equal(a.run('data.reviewHistory[0].subject'),'');
   a.run('undoDelete()');assert.equal(a.run('data.plans[0].subject'),id);assert.equal(a.run('data.resources[0].subject'),id);assert.equal(a.run('data.reviewHistory[0].subject'),id);a.run('validate(data)');
 });
+
+test('mistake notebook records correction, retries and mastery',()=>{
+  const a=workspace();a.route('#mistakes');a.$('#add-mistake').click();a.submit({title:'Momentum question',question:'Two objects collide',original:'Used energy only',correction:'Check total momentum',cause:'概念理解',source:'Practice paper'});
+  assert.equal(a.run('data.mistakes.length'),1);assert.ok(a.$('.mistake-question').textContent.includes('collide'));
+  a.$('[data-mistake-retry]').click();a.submit({result:'again',notes:'Need to track signs'});assert.equal(a.run('data.mistakes[0].status'),'待重做');assert.equal(a.run('data.mistakes[0].review'),a.run('dateAfter(3)'));
+  a.$('[data-mistake-retry]').click();a.submit({result:'solved'});assert.equal(a.run('data.mistakes[0].status'),'已掌握');assert.equal(a.run('data.mistakes[0].attempts.length'),2);assert.equal(a.run('data.mistakes[0].review'),'');
+  const b=workspace(a.memory);assert.equal(b.run('data.mistakes[0].attempts.length'),2);a.run('validate(data)');
+});
+
+test('retry save failures roll back status and attempts, then allow retry',()=>{
+  const a=workspace();a.run('mistakeEditor()');a.submit({title:'Question'});a.run('recordRetry(data.mistakes[0].id)');a.fault.data=true;
+  a.submit({result:'solved'});assert.equal(a.run('data.mistakes[0].attempts.length'),0);assert.equal(a.run('data.mistakes[0].status'),'待订正');
+  a.fault.data=false;a.submit({result:'solved'});assert.equal(a.run('data.mistakes[0].attempts.length'),1);
+});
+
+test('one unresolved revision task is linked to a mistake without duplicates',()=>{
+  const a=workspace();a.run('mistakeEditor()');a.submit({title:'A question'});a.run('mistakeTask(data.mistakes[0].id)');a.submit({});assert.equal(a.run('data.tasks.length'),1);
+  assert.equal(a.run('data.tasks[0].mistakeId'),a.run('data.mistakes[0].id'));
+  a.run('mistakeTask(data.mistakes[0].id)');a.submit({title:'Updated revision task'});assert.equal(a.run('data.tasks.length'),1);assert.equal(a.run('data.tasks[0].title'),'Updated revision task');
+});
+
+test('mistake links survive subject removal and undo',()=>{
+  const a=workspace(),subject=a.subject();a.run(`mistakeEditor(null,${JSON.stringify(subject)})`);a.submit({title:'Question'});
+  a.run(`deleteRecord('subjects',${JSON.stringify(subject)})`);assert.equal(a.run('data.mistakes[0].subject'),'');a.run('undoDelete()');assert.equal(a.run('data.mistakes[0].subject'),subject);
+});
+
+test('analytics excludes future logs and measures actual active days and longest run',()=>{
+  const a=workspace();for(const [offset,minutes] of [[-1,60],[0,30],[1,500]]){a.run("add('logs')");a.submit({title:'Study',date:a.run(`dateAfter(${offset})`),minutes})}
+  assert.equal(a.run('analysisSnapshot(7).minutes'),90);assert.equal(a.run('analysisSnapshot(7).active'),2);assert.equal(a.run('analysisSnapshot(7).longest'),2);
+  a.route('#analytics');assert.equal(a.$('.activity-grid').children.length,30);a.$('[data-analysis-days="7"]').click();assert.equal(a.$('.activity-grid').children.length,7);
+});
+
+test('latest same-day grade is shown first in list, subject and analytics',()=>{
+  const a=workspace(),subject=a.subject();a.run("add('grades')");a.submit({title:'First quiz',score:4,subject});a.run("add('grades')");a.submit({title:'Second quiz',score:7,subject});
+  a.route('#grades');assert.ok(a.$('.stats').querySelectorAll('strong')[2].textContent.trim().startsWith('7'));assert.equal(a.$('#list .row-title').textContent,'Second quiz');
+  a.route('#subject/'+subject);assert.ok(a.$('.stats').querySelectorAll('strong')[3].textContent.trim().startsWith('7'));
+  a.route('#analytics');assert.ok(a.$('#app').textContent.includes('Second quiz'));assert.ok(!a.$('#app').textContent.includes('First quiz'));
+});
+
+test('global search finds correction text, filters record types and opens the matching editor',()=>{
+  const a=workspace();a.task('Momentum task');a.run('mistakeEditor()');a.submit({title:'Collision',correction:'Conservation of momentum'});
+  assert.equal(a.run("findRecords('conservation momentum','mistakes').length"),1);assert.equal(a.run("findRecords('momentum','tasks').length"),1);
+  a.route('#search');a.$('#global-query').value='conservation momentum';a.$('#global-query').oninput({target:a.$('#global-query')});assert.equal(a.$('#global-results').querySelectorAll('[data-result-kind]').length,1);
+  a.$('[data-result-kind]').click();assert.equal(a.$('#f-title').value,'Collision');
+});
+
+test('global search paginates results and escapes user content',()=>{
+  const a=workspace();a.run(`mutate(()=>{for(let i=0;i<70;i++)data.tasks.push({id:'search-'+i,title:'Search item '+i,subject:'',date:today(),notes:'<script>bad()</script>',type:'复习',priority:'普通',done:false})})`);
+  a.route('#search');a.$('#global-query').value='Search item';a.$('#global-query').oninput({target:a.$('#global-query')});assert.equal(a.$('#global-results').querySelectorAll('[data-result-kind]').length,60);assert.equal(a.$('#global-results').querySelectorAll('script').length,0);
+  a.$('#load-more-results').click();assert.equal(a.$('#global-results').querySelectorAll('[data-result-kind]').length,70);
+});
+
+test('unsaved settings survive another tab updating and canceled navigation',()=>{
+  const memory=new Map(),a=workspace(memory),b=workspace(memory);a.route('#settings');a.$('#f-name').value='Unsaved name';a.$('#profile-form').oninput();b.task();a.events.storage({key:KEY});
+  assert.equal(a.$('#f-name').value,'Unsaved name');assert.equal(a.run('profileDirty'),true);assert.ok(a.$('#reload-records'));
+  a.run("confirm=()=>false;location.hash='#tasks'");a.events.hashchange();a.events.hashchange();assert.equal(a.$('#f-name').value,'Unsaved name');assert.equal(a.run('profileDirty'),true);
+  a.run('confirm=()=>true');a.$('#reload-records').click();assert.equal(a.run('profileDirty'),false);assert.equal(a.run('data.tasks.length'),1);
+});
+
+test('schema rejects coercible non-string groups, time arrays and whitespace-only resources',()=>{
+  const a=workspace();a.subject();a.run("studyEditor('plan')");a.submit({title:'Study'});const raw=a.memory.get(KEY);
+  for(const group of [[3],null,'03']){const d=JSON.parse(raw);d.subjects[0].group=group;assert.throws(()=>a.run('validate')(d))}
+  const d=JSON.parse(raw);d.plans[0].time=['14:30'];assert.throws(()=>a.run('validate')(d));
+  a.run("studyEditor('resource')");a.submit({title:'Empty note',notes:'   '});assert.equal(a.run('data.resources.length'),0);
+  const old=JSON.parse(raw);delete old.mistakes;assert.equal(a.run('decodeData')(JSON.stringify(old)).mistakes.length,0);
+});
