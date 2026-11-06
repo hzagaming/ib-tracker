@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "test": "node --check dist/app.js && node tests/smoke.cjs && node --test tests/regressions.cjs"
+    "build": "node scripts/build.cjs",
+    "test": "node scripts/build.cjs --check && node --check dist/app.js && node tests/smoke.cjs && node --test tests/regressions.cjs"
   },
   "devDependencies": {
     "linkedom": "0.18.15"

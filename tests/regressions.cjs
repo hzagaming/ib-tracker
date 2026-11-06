@@ -134,3 +134,70 @@ test('calendar date arithmetic ignores DST clock changes and returns whole days'
   const a=workspace();assert.equal(a.run('daysUntil(today())'),0);
   assert.equal(a.run("daysUntil(localDate(new Date(new Date().getFullYear(),new Date().getMonth(),new Date().getDate()+1)))"),1);
 });
+
+test('new study pages render and weekly navigation crosses months correctly',()=>{
+  const a=workspace();
+  for(const route of ['planner','review','library']){a.route('#'+route);assert.ok(a.$('#app h1'),route)}
+  a.clock.now=new Date(2026,10,1,12).getTime();
+  assert.equal(a.run('weekDates(0)[0]'),'2026-10-26');assert.equal(a.run('weekDates(0)[6]'),'2026-11-01');
+  a.route('#planner');a.$('#week-next').click();assert.equal(a.run('weekDates()[0]'),'2026-11-02');
+  a.$('#week-now').click();assert.equal(a.run('plannerOffset'),0);
+});
+
+test('a weekly plan creates one actual learning log and retains its planned duration',()=>{
+  const a=workspace();a.route('#planner');a.$('[data-study-add="plan"]').click();a.submit({title:'Practise mechanics',minutes:45,time:'14:30'});
+  assert.equal(a.run('data.plans[0].minutes'),45);assert.ok(a.$('.plan-title').textContent.includes('Practise mechanics'));
+  a.$('[data-plan-complete]').click();a.submit({minutes:32,notes:'Momentum needs another look'});
+  assert.equal(a.run('data.plans[0].done'),true);assert.equal(a.run('data.logs[0].minutes'),32);assert.equal(a.run('data.plans[0].minutes'),45);
+  a.run('completePlan(data.plans[0].id)');assert.equal(a.run('data.logs.length'),1);
+  a.run('validate(data)');
+});
+
+test('plan completion rolls back both the plan and log on failure and retries cleanly',()=>{
+  const a=workspace();a.run("studyEditor('plan')");a.submit({title:'Study'});a.run('completePlan(data.plans[0].id)');
+  a.fault.data=true;a.submit({minutes:20});assert.equal(a.run('data.plans[0].done'),false);assert.equal(a.run('data.logs.length'),0);
+  a.fault.data=false;a.submit({minutes:20});assert.equal(a.run('data.plans[0].done'),true);assert.equal(a.run('data.logs.length'),1);
+  a.run("deleteRecord('plans',data.plans[0].id)");assert.equal(a.run('data.logs.length'),1);a.run('undoDelete()');assert.equal(a.run('data.plans.length'),1);
+});
+
+test('review ratings reschedule learned topics and can be undone without deleting unrelated logs',()=>{
+  const a=workspace(),subject=a.subject();a.run(`topicEditor(${JSON.stringify(subject)})`);a.submit({title:'Forces',review:a.run('today()')});
+  a.route('#review');assert.ok(a.$('[data-review-rate]'));
+  a.$('[data-review-rate$=":good"]').click();assert.equal(a.run('data.reviewHistory.length'),1);assert.equal(a.run('data.topics[0].status'),'mastered');assert.equal(a.run('data.topics[0].review'),a.run('dateAfter(7)'));
+  a.$('[data-review-scope="upcoming"]').click();assert.ok(a.$('.review-card'));
+  a.clock.now+=7*86400000;a.run("reviewScope='due';render()");assert.ok(a.$('[data-review-rate]'));
+  a.run('validate(data)');
+  a.$('[data-review-rate$=":again"]').click();assert.equal(a.run('data.reviewHistory.length'),2);a.$('#toast-action').click();assert.equal(a.run('data.reviewHistory.length'),1);
+  assert.equal(a.run('data.topics[0].status'),'mastered');
+});
+
+test('failed review writes do not change the topic or add history',()=>{
+  const a=workspace(),id=a.subject();a.run(`topicEditor(${JSON.stringify(id)})`);a.submit({title:'Forces',review:a.run('today()')});a.route('#review');
+  a.fault.data=true;a.$('[data-review-rate$=":okay"]').click();assert.equal(a.run('data.reviewHistory.length'),0);assert.equal(a.run('data.topics[0].status'),'new');
+  a.fault.data=false;a.$('[data-review-rate$=":okay"]').click();assert.equal(a.run('data.reviewHistory.length'),1);
+});
+
+test('library supports safe URLs, editable guides, filtering, stars and undo',()=>{
+  const a=workspace();a.route('#library');a.$('[data-guide-save="mistakes"]').click();assert.equal(a.run('data.resources.length'),1);
+  a.$('[data-guide-save="mistakes"]').click();assert.equal(a.run('data.resources.length'),1);a.$('#cancel').click();
+  a.$('[data-resource-star]').click();assert.equal(a.run('data.resources[0].favorite'),true);
+  a.$('[data-study-add="resource"]').click();a.submit({title:'My resource',url:'https://example.com/notes',kind:'文章'});assert.equal(a.run('data.resources.length'),2);
+  a.$('#library-query').value='My resource';a.$('#library-query').oninput({target:a.$('#library-query')});assert.equal(a.$('#library-results').querySelectorAll('.resource-card').length,1);
+  assert.equal(a.$('#library-results a[target="_blank"]').getAttribute('rel'),'noopener noreferrer');
+  a.$('#library-results [data-delete]').click();assert.equal(a.run('data.resources.length'),1);a.$('#toast-action').click();assert.equal(a.run('data.resources.length'),2);
+  a.run("studyEditor('resource')");a.submit({title:'Unsafe',url:'javascript:alert(1)'});assert.equal(a.run('data.resources.length'),2);assert.equal(a.$('#modal').open,true);
+});
+
+test('old backups migrate all new collections and new study data round-trips',()=>{
+  const a=workspace();const old=a.run('initial()');delete old.plans;delete old.resources;delete old.reviewHistory;delete old.profile.weeklyGoal;
+  const migrated=a.run('decodeData')(JSON.stringify(old));assert.equal(migrated.plans.length,0);assert.equal(migrated.resources.length,0);assert.equal(migrated.reviewHistory.length,0);
+  a.run("studyEditor('plan')");a.submit({title:'A plan'});a.run("saveGuide('weekly')");const b=workspace(a.memory);assert.equal(b.run('data.plans.length'),1);assert.equal(b.run('data.resources.length'),1);assert.equal(b.run('recoveryRaw'),null);
+});
+
+test('removing a subject preserves and restores plans, resources and review history relationships',()=>{
+  const a=workspace(),id=a.subject();a.run(`studyEditor('plan',null,{subject:${JSON.stringify(id)}})`);a.submit({title:'Study'});
+  a.run(`studyEditor('resource',null,{subject:${JSON.stringify(id)}})`);a.submit({title:'Notes',notes:'Important'});
+  a.run(`topicEditor(${JSON.stringify(id)})`);a.submit({title:'Concept',review:a.run('today()')});a.run("rateReview(data.topics[0].id,'okay')");
+  a.run(`deleteRecord('subjects',${JSON.stringify(id)})`);assert.equal(a.run('data.plans[0].subject'),'');assert.equal(a.run('data.resources[0].subject'),'');assert.equal(a.run('data.reviewHistory[0].subject'),'');
+  a.run('undoDelete()');assert.equal(a.run('data.plans[0].subject'),id);assert.equal(a.run('data.resources[0].subject'),id);assert.equal(a.run('data.reviewHistory[0].subject'),id);a.run('validate(data)');
+});
