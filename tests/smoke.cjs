@@ -18,3 +18,22 @@ assert.throws(()=>run('validate({...data,tasks:[{...data.tasks[0],id:"bad id"}]}
 assert.ok(storage.get('ib-atlas-v1').includes('Updated'));assert.equal(run('esc("<script>")'),'&lt;script&gt;');
 run('data=JSON.parse(localStorage.getItem("ib-atlas-v1"));location.hash="#dashboard";render()');assert.ok(el('app').innerHTML.includes('0.8'));assert.ok(el('app').innerHTML.includes('Physics'));
 console.log('PASS: 8 page renders; subject/task/log/grade/core creation; task edit; numeric validation; backup schema; persistence restore; HTML escaping.');
+// Subject workspaces calculate mastery from topics and preserve v1 backups.
+run(`location.hash='#subject/'+data.subjects[0].id;render();topicEditor(data.subjects[0].id)`);
+elements.form.values={title:'Forces',status:'mastered',review:'2026-11-10',notes:'Newton laws'};
+elements.form.onsubmit({preventDefault(){},target:elements.form});
+assert.equal(run('data.topics.length'),1);assert.equal(run('subjectProgress(data.subjects[0])'),100);
+assert.ok(elements.app.innerHTML.includes('Forces'));assert.ok(elements.app.innerHTML.includes('知识点与复习清单'));
+run(`data.topics[0].status='review';render()`);assert.equal(run('subjectProgress(data.subjects[0])'),0);
+run(`location.hash='#calendar';calendarMonth=new Date(2026,10,1);render()`);assert.ok(elements.app.innerHTML.includes('Updated'));run('calendarMonth=new Date(2026,11,1);render()');assert.ok(elements.app.innerHTML.includes('Research question'));
+run(`location.hash='#tasks';render();subjectFilter='missing';renderList()`);assert.ok(!elements.list.innerHTML.includes('Updated'));
+run(`subjectFilter='';priorityFilter='紧急';renderList()`);assert.ok(!elements.list.innerHTML.includes('Updated'));
+run(`priorityFilter='';renderList()`);assert.ok(elements.list.innerHTML.includes('Updated'));
+run('validate(JSON.parse(JSON.stringify(data)))');
+run('validate({...data,topics:undefined})');
+assert.throws(()=>run('validate({...data,topics:[{...data.topics[0],status:"invalid"}]})'));
+assert.throws(()=>run('validate({...data,topics:[{...data.topics[0],subject:"missing"}]})'));
+assert.throws(()=>run('validate({...data,tasks:[data.tasks[0],data.tasks[0]]})'));
+run("add('subjects');document.querySelector('#f-name').value='Physics';document.querySelector('#f-name').onchange()");
+assert.equal(elements['f-group'].value,3);
+console.log('PASS: subject detail, topic creation and mastery, month calendar deadlines, subject/priority filters, legacy backup compatibility, invalid topic and duplicate ID rejection, catalog group selection.');
