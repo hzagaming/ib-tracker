@@ -63,7 +63,7 @@ test('failed topic edit retries against restored data',()=>{
 });
 
 test('profile save failures leave the prior profile intact',()=>{
-  const a=workspace();a.route('#settings');a.fault.data=true;a.$('#f-name').value='New name';
+  const a=workspace();a.route('#settings');a.fault.data=true;a.$('#profile-name').value='New name';
   a.$('#profile-form').onsubmit({preventDefault(){},target:a.$('#profile-form')});assert.equal(a.run('data.profile.name'),'我的');
 });
 
@@ -254,9 +254,9 @@ test('global search paginates results and escapes user content',()=>{
 });
 
 test('unsaved settings survive another tab updating and canceled navigation',()=>{
-  const memory=new Map(),a=workspace(memory),b=workspace(memory);a.route('#settings');a.$('#f-name').value='Unsaved name';a.$('#profile-form').oninput();b.task();a.events.storage({key:KEY});
-  assert.equal(a.$('#f-name').value,'Unsaved name');assert.equal(a.run('profileDirty'),true);assert.ok(a.$('#reload-records'));
-  a.run("confirm=()=>false;location.hash='#tasks'");a.events.hashchange();a.events.hashchange();assert.equal(a.$('#f-name').value,'Unsaved name');assert.equal(a.run('profileDirty'),true);
+  const memory=new Map(),a=workspace(memory),b=workspace(memory);a.route('#settings');a.$('#profile-name').value='Unsaved name';a.$('#profile-form').oninput();b.task();a.events.storage({key:KEY});
+  assert.equal(a.$('#profile-name').value,'Unsaved name');assert.equal(a.run('profileDirty'),true);assert.ok(a.$('#reload-records'));
+  a.run("confirm=()=>false;location.hash='#tasks'");a.events.hashchange();a.events.hashchange();assert.equal(a.$('#profile-name').value,'Unsaved name');assert.equal(a.run('profileDirty'),true);
   a.run('confirm=()=>true');a.$('#reload-records').click();assert.equal(a.run('profileDirty'),false);assert.equal(a.run('data.tasks.length'),1);
 });
 
@@ -266,4 +266,67 @@ test('schema rejects coercible non-string groups, time arrays and whitespace-onl
   const d=JSON.parse(raw);d.plans[0].time=['14:30'];assert.throws(()=>a.run('validate')(d));
   a.run("studyEditor('resource')");a.submit({title:'Empty note',notes:'   '});assert.equal(a.run('data.resources.length'),0);
   const old=JSON.parse(raw);delete old.mistakes;assert.equal(a.run('decodeData')(JSON.stringify(old)).mistakes.length,0);
+});
+
+test('exam planning creates three dated tasks once and exposes exam in calendar',()=>{
+  const a=workspace(),subject=a.subject();a.route('#exams');a.$('#add-exam').click();a.submit({title:'Physics mock',subject,date:a.run('dateAfter(10)'),time:'09:30',scope:'Mechanics'});
+  assert.equal(a.run('data.exams.length'),1);assert.ok(a.$('.exam-card').textContent.includes('Physics mock'));
+  a.$('[data-exam-tasks]').click();a.submit({});assert.equal(a.run('data.tasks.length'),3);assert.equal(a.run('data.tasks[0].date'),a.run('today()'));
+  a.run('createExamTasks(data.exams[0].id)');a.submit({});assert.equal(a.run('data.tasks.length'),3);
+  a.route('#calendar');a.run("calendarMonth=new Date(data.exams[0].date+'T12:00:00');render()");assert.ok(a.$('[data-edit^="exams:"]'));
+  a.$('[data-edit^="exams:"]').click();assert.equal(a.$('#f-title').value,'Physics mock');
+});
+
+test('past and completed exams do not generate new revision tasks',()=>{
+  const a=workspace();a.run('examEditor()');a.submit({title:'Past exam',date:a.run('dateAfter(-1)')});a.run('createExamTasks(data.exams[0].id)');assert.equal(a.run('data.tasks.length'),0);assert.equal(a.$('#modal').open,false);
+  a.run('examEditor(data.exams[0].id)');a.submit({date:a.run('dateAfter(5)'),status:'已完成'});a.run('createExamTasks(data.exams[0].id)');assert.equal(a.run('data.tasks.length'),0);
+});
+
+test('exam grade and completion are atomic, retries work and updates reuse the grade',()=>{
+  const a=workspace();a.run('examEditor()');a.submit({title:'Quiz'});a.run('examGrade(data.exams[0].id)');a.fault.data=true;a.submit({score:6});
+  assert.equal(a.run('data.grades.length'),0);assert.equal(a.run('data.exams[0].status'),'计划中');a.fault.data=false;a.submit({score:6});
+  assert.equal(a.run('data.grades.length'),1);assert.equal(a.run('data.exams[0].status'),'已完成');a.run('examGrade(data.exams[0].id)');a.submit({score:7});assert.equal(a.run('data.grades.length'),1);assert.equal(a.run('data.grades[0].score'),7);
+});
+
+test('weekly reflection is editable, requires meaningful content and creates one pending action',()=>{
+  const a=workspace();a.route('#reflections');a.$('#write-reflection').click();a.submit({});assert.equal(a.run('data.reflections.length'),0);assert.equal(a.$('#modal').open,true);
+  a.submit({wins:'I can explain momentum',next:'Redo the collision exercise'});assert.equal(a.run('data.reflections.length'),1);
+  a.run('reflectionEditor()');a.submit({challenge:'Signs in calculations'});assert.equal(a.run('data.reflections.length'),1);
+  a.run('reflectionTask(data.reflections[0].id)');a.submit({});assert.equal(a.run('data.tasks.length'),1);a.run('reflectionTask(data.reflections[0].id)');a.submit({title:'Updated action'});assert.equal(a.run('data.tasks.length'),1);
+});
+
+test('weekly summary excludes future logs and reflection dates remain unique Mondays',()=>{
+  const a=workspace();a.clock.now=new Date(2026,10,4,12).getTime();
+  a.run("add('logs')");a.submit({title:'Today',minutes:30,date:'2026-11-04'});a.run("add('logs')");a.submit({title:'Future',minutes:50,date:'2026-11-06'});
+  assert.equal(a.run("reflectionSummary('2026-11-02').minutes"),30);
+  a.run('reflectionEditor()');a.submit({wins:'Progress'});const d=JSON.parse(a.memory.get(KEY));d.reflections.push({...d.reflections[0],id:'duplicate-week'});assert.throws(()=>a.run('validate')(d));
+  d.reflections.pop();d.reflections[0].weekStart='2026-11-03';assert.throws(()=>a.run('validate')(d));
+});
+
+test('a successful modal submit cannot create duplicate records on repeated events',()=>{
+  const a=workspace();a.run("add('tasks')");a.$('#f-title').value='One task';const handler=a.$('#form').onsubmit,event={preventDefault(){},target:a.$('#form')};handler(event);handler(event);assert.equal(a.run('data.tasks.length'),1);
+});
+
+test('settings draft survives quick-add saves and its field IDs do not collide with dialogs',()=>{
+  const a=workspace();a.route('#settings');a.$('#profile-name').value='My unsaved name';a.$('#profile-form').oninput();a.$('#quick-add').click();a.$('[data-quick="tasks"]').click();a.submit({title:'Quick task'});
+  assert.equal(a.$('#profile-name').value,'My unsaved name');assert.equal(a.run('data.profile.name'),'我的');assert.equal(a.run('profileDirty'),true);
+  a.run("add('subjects')");const ids=[...a.document.querySelectorAll('[id]')].map(el=>el.id);assert.equal(new Set(ids).size,ids.length);
+  a.$('#f-name').value='Physics';a.$('#f-name').onchange();a.submit({});assert.equal(a.run('data.subjects[0].group'),'3');assert.equal(a.$('#profile-name').value,'My unsaved name');
+});
+
+test('old backups migrate exams and reflections and new search finds both types',()=>{
+  const a=workspace();const old=a.run('initial()');delete old.exams;delete old.reflections;const next=a.run('decodeData')(JSON.stringify(old));assert.equal(next.exams.length,0);assert.equal(next.reflections.length,0);
+  a.run('examEditor()');a.submit({title:'Mechanics mock'});a.run('reflectionEditor()');a.submit({wins:'Mechanics clicked'});
+  assert.equal(a.run("findRecords('mechanics','exams').length"),1);assert.equal(a.run("findRecords('mechanics','reflections').length"),1);const b=workspace(a.memory);assert.equal(b.run('data.exams.length'),1);assert.equal(b.run('data.reflections.length'),1);
+});
+
+test('deleting exams or subjects preserves associated tasks and grades',()=>{
+  const a=workspace(),subject=a.subject();a.run(`examEditor(null,${JSON.stringify(subject)})`);a.submit({title:'Exam'});a.run('createExamTasks(data.exams[0].id)');a.submit({});a.run('examGrade(data.exams[0].id)');a.submit({score:6});
+  a.run(`deleteRecord('subjects',${JSON.stringify(subject)})`);assert.equal(a.run('data.exams[0].subject'),'');a.run('undoDelete()');assert.equal(a.run('data.exams[0].subject'),subject);
+  a.run("deleteRecord('exams',data.exams[0].id)");assert.equal(a.run('data.tasks.length'),3);assert.equal(a.run('data.grades.length'),1);a.run('undoDelete()');assert.equal(a.run('data.exams.length'),1);
+});
+
+test('backup import accepts files above the former 5MB limit and rejects oversized input',async()=>{
+  const a=workspace(),file=a.file(JSON.stringify(a.run('initial()')));file.files[0].size=6*1024*1024;await a.run('importData')({target:file});assert.equal(a.run('data.subjects.length'),0);assert.ok(a.memory.has(KEY));
+  const before=a.memory.get(KEY);file.files[0].size=21*1024*1024;await a.run('importData')({target:file});assert.equal(a.memory.get(KEY),before);assert.ok(a.$('#toast').textContent.includes('20MB'));
 });

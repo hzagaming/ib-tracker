@@ -141,4 +141,4 @@ function bindStudy() {
   renderLibraryResults();
 }
 
-function reconcileStudyFilters(){if(reviewSubject&&!data.subjects.some(s=>s.id===reviewSubject))reviewSubject='';if(librarySubject&&!data.subjects.some(s=>s.id===librarySubject))librarySubject=''}
+function reconcileStudyFilters(){if(examSubject&&!data.subjects.some(s=>s.id===examSubject))examSubject='';if(reviewSubject&&!data.subjects.some(s=>s.id===reviewSubject))reviewSubject='';if(librarySubject&&!data.subjects.some(s=>s.id===librarySubject))librarySubject=''}

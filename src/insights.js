@@ -2,9 +2,10 @@
 
 let mistakeQuery='',mistakeSubject='',mistakeStatus='',analysisDays=30,globalQuery='',globalKind='',globalLimit=60;
 const MISTAKE_CAUSES=['概念理解','审题','方法选择','计算','表达','其他'];
-const SEARCH_TYPES={subjects:'学科',topics:'知识点',tasks:'任务',logs:'学习日志',grades:'成绩',core:'核心项目',plans:'学习计划',resources:'学习资料',mistakes:'错题'};
+const SEARCH_TYPES={subjects:'学科',topics:'知识点',tasks:'任务',logs:'学习日志',grades:'成绩',core:'核心项目',plans:'学习计划',resources:'学习资料',mistakes:'错题',exams:'考试',reflections:'周复盘'};
 
 function validateInsights(d,ids,subjectIds) {
+  validateProgress(d,ids,subjectIds);
   const list=d.mistakes??[],id=v=>typeof v==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(v);
   const text=(v,max)=>typeof v==='string'&&v.length<=max;
   if(!Array.isArray(list)||list.length>10000)throw Error('错题记录格式不正确');
@@ -88,7 +89,7 @@ function findRecords(query,kind='') {
     if(kind&&key!==kind)continue;
     for(const x of data[key]){
       const title=key==='subjects'?x.name:x.title;
-      const text=[title,x.notes,x.question,x.correction,x.original,x.source,x.type,x.cause,key==='subjects'?x.level:subjectName(x.subject)].filter(Boolean).join(' ').toLowerCase();
+      const text=[title,x.notes,x.question,x.correction,x.original,x.source,x.type,x.cause,x.scope,x.wins,x.challenge,x.adjustment,x.next,key==='subjects'?x.level:subjectName(x.subject)].filter(Boolean).join(' ').toLowerCase();
       if(tokens.every(t=>text.includes(t)))results.push({kind:key,label,id:x.id,title,subject:x.subject,date:x.date||'',description:x.notes||x.question||''});
     }
   }
@@ -107,6 +108,8 @@ function openSearchResult(kind,id) {
   if(kind==='topics'){const t=data.topics.find(t=>t.id===id);if(t)topicEditor(t.subject,id);return}
   if(kind==='plans'||kind==='resources'){studyEditor(kind==='plans'?'plan':'resource',id);return}
   if(kind==='mistakes'){mistakeEditor(id);return}
+  if(kind==='exams'){examEditor(id);return}
+  if(kind==='reflections'){reflectionEditor(id);return}
   add(kind,id);
 }
 function openGlobalSearch() {
