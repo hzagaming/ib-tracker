@@ -37,3 +37,16 @@ assert.throws(()=>run('validate({...data,tasks:[data.tasks[0],data.tasks[0]]})')
 run("add('subjects');document.querySelector('#f-name').value='Physics';document.querySelector('#f-name').onchange()");
 assert.equal(elements['f-group'].value,3);
 console.log('PASS: subject detail, topic creation and mastery, month calendar deadlines, subject/priority filters, legacy backup compatibility, invalid topic and duplicate ID rejection, catalog group selection.');
+// UI actions must preserve user data, including work done after a deletion.
+run(`location.hash='#dashboard';render()`);assert.ok(elements.app.innerHTML.includes('到期复习'));assert.ok(!elements.app.innerHTML.includes('三小步'));run('var savedForOnboarding=data;data=initial();render()');assert.ok(elements.app.innerHTML.includes('三小步'));run('data=savedForOnboarding');
+const taskId=run('data.tasks[0].id');run(`deleteRecord('tasks','${taskId}')`);assert.equal(run('data.tasks.length'),0);
+run(`data.logs.push({id:'after-delete',title:'New work',subject:'',date:'2026-11-07',minutes:15,notes:''});undoDelete()`);
+assert.equal(run('data.tasks.length'),1);assert.ok(run('data.logs.some(l=>l.id==="after-delete")'));
+run(`deleteRecord('subjects','${subject}')`);assert.equal(run('data.topics.length'),0);assert.equal(run('data.tasks[0].subject'),'');run('undoDelete()');assert.equal(run('data.topics.length'),1);assert.equal(run('data.tasks[0].subject'),subject);
+run(`data.tasks[0].date=today();data.tasks[0].done=false`);assert.equal(run('filterTasks(data.tasks,"today").length'),1);assert.equal(run('filterTasks(data.tasks,"overdue").length'),0);assert.equal(run('filterTasks(data.tasks,"week").length'),1);
+run(`data.tasks[0].done=true`);assert.equal(run('filterTasks(data.tasks,"today").length'),0);assert.equal(run('filterTasks(data.tasks,"done").length'),1);
+run(`timer={remaining:1200,running:false,end:0};persistTimer();location.hash='#focus';render()`);assert.equal(run('restoreTimer().remaining'),1200);
+elements['timer-save'].onclick();assert.equal(run('focusDraft'),true);assert.equal(elements['f-minutes'].value,5);elements.cancel.onclick();assert.equal(run('timer.remaining'),1200);assert.equal(run('focusDraft'),false);
+elements['timer-save'].onclick();elements.form.values={title:'Focused study',subject:'',date:'2026-11-07',minutes:'5',notes:''};elements.form.onsubmit({preventDefault(){},target:elements.form});assert.equal(run('timer.remaining'),1500);assert.equal(run('data.logs.at(-1).minutes'),5);
+run(`add('tasks')`);const count=run('data.tasks.length');elements.form.values={title:'   ',subject:'',date:'2026-11-07',priority:'普通',type:'复习',notes:''};elements.form.onsubmit({preventDefault(){},target:elements.form});assert.equal(run('data.tasks.length'),count);
+console.log('PASS: actionable dashboard, scoped deletion undo, subject relationships restored, time chips, persistent focus timer, cancel-safe focus logging, whitespace validation.');
