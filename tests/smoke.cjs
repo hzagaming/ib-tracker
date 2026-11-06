@@ -13,6 +13,8 @@ submit('core',{title:'Research question',subject,type:'EE',date:'2026-12-01',sta
 const id=run('data.tasks[0].id');submit('tasks',{title:'Updated',subject,date:'2026-11-08',priority:'普通',type:'复习',notes:'edit'},id);assert.equal(run('data.tasks.length'),1);assert.equal(run('data.tasks[0].title'),'Updated');
 run('validate(JSON.parse(JSON.stringify(data)))');assert.throws(()=>run('validate({version:2})'));
 assert.throws(()=>run('validate({...data,grades:[{id:"x",title:"Bad",date:"2026-11-06",score:9}]})'));
+assert.throws(()=>run('validate({...data,subjects:[{...data.subjects[0],target:"<script>"}]})'));
+assert.throws(()=>run('validate({...data,tasks:[{...data.tasks[0],id:"bad id"}]})'));
 assert.ok(storage.get('ib-atlas-v1').includes('Updated'));assert.equal(run('esc("<script>")'),'&lt;script&gt;');
 run('data=JSON.parse(localStorage.getItem("ib-atlas-v1"));location.hash="#dashboard";render()');assert.ok(el('app').innerHTML.includes('0.8'));assert.ok(el('app').innerHTML.includes('Physics'));
 console.log('PASS: 8 page renders; subject/task/log/grade/core creation; task edit; numeric validation; backup schema; persistence restore; HTML escaping.');
