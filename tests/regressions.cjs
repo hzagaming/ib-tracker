@@ -330,3 +330,75 @@ test('backup import accepts files above the former 5MB limit and rejects oversiz
   const a=workspace(),file=a.file(JSON.stringify(a.run('initial()')));file.files[0].size=6*1024*1024;await a.run('importData')({target:file});assert.equal(a.run('data.subjects.length'),0);assert.ok(a.memory.has(KEY));
   const before=a.memory.get(KEY);file.files[0].size=21*1024*1024;await a.run('importData')({target:file});assert.equal(a.memory.get(KEY),before);assert.ok(a.$('#toast').textContent.includes('20MB'));
 });
+
+test('grouped navigation keeps every page reachable and shows relevant counts',()=>{
+  const a=workspace();a.task();const subject=a.subject();a.route('#dashboard');
+  assert.equal(a.$('#nav').querySelectorAll('.nav-group').length,4);assert.equal(a.$('#nav').querySelectorAll('a').length,a.run('nav.length'));
+  assert.equal(a.$('#nav a[href="#tasks"] .nav-count').textContent,'1');a.route('#subject/'+subject);assert.equal(a.$('#nav a[href="#subjects"]').getAttribute('aria-current'),'location');
+});
+
+test('batch completion updates selected tasks and undo preserves unrelated records',()=>{
+  const a=workspace();a.task('First');a.task('Second');a.route('#tasks');a.$('#enable-task-bulk').click();a.$('#select-visible-tasks').click();a.$('#complete-selected-tasks').click();
+  assert.equal(a.run('data.tasks.filter(t=>t.done).length'),2);assert.equal(a.run('taskSelection.size'),0);
+  a.run("mutate(()=>data.logs.push({id:'unrelated-log',title:'Independent study',subject:'',date:today(),minutes:20,notes:''}))");a.$('#toast-action').click();
+  assert.equal(a.run('data.tasks.filter(t=>t.done).length'),0);assert.equal(a.run('data.logs.length'),1);
+});
+
+test('failed batch writes preserve selection and allow a clean retry',()=>{
+  const a=workspace();a.task('First');a.task('Second');a.route('#tasks');a.$('#enable-task-bulk').click();a.$('#select-visible-tasks').click();a.fault.data=true;a.$('#complete-selected-tasks').click();
+  assert.equal(a.run('data.tasks.filter(t=>t.done).length'),0);assert.equal(a.run('taskSelection.size'),2);
+  a.fault.data=false;a.$('#complete-selected-tasks').click();assert.equal(a.run('data.tasks.filter(t=>t.done).length'),2);
+});
+
+test('batch selection follows visible results and cannot modify hidden records',()=>{
+  const a=workspace();a.task('Alpha');a.task('Beta');a.route('#tasks');a.$('#enable-task-bulk').click();a.$('#select-visible-tasks').click();
+  a.$('#search').value='Alpha';a.$('#search').oninput({target:a.$('#search')});assert.equal(a.run('taskSelection.size'),1);a.$('#complete-selected-tasks').click();
+  assert.equal(a.run('data.tasks.find(t=>t.title==="Alpha").done'),true);assert.equal(a.run('data.tasks.find(t=>t.title==="Beta").done'),false);
+});
+
+test('quick postpone is undoable and bulk postponement leaves completed history alone',()=>{
+  const a=workspace();a.task('Open');a.task('Done');a.run("mutate(()=>{data.tasks[0].date=dateAfter(-2);data.tasks[1].done=true})");const old=a.run('data.tasks[0].date'),completedDate=a.run('data.tasks[1].date');
+  a.route('#tasks');a.$('#enable-task-bulk').click();a.$('#select-visible-tasks').click();a.$('#postpone-selected-tasks').click();
+  assert.equal(a.run('data.tasks[0].date'),a.run('dateAfter(1)'));assert.equal(a.run('data.tasks[1].date'),completedDate);a.$('#toast-action').click();assert.equal(a.run('data.tasks[0].date'),old);
+});
+
+test('copying a task preserves content but creates an independent unfinished record',()=>{
+  const a=workspace();a.task('Original');a.run("mutate(()=>Object.assign(data.tasks[0],{examId:'exam-origin',examPhase:'scope',done:true,notes:'Keep this note',priority:'重要'}))");a.route('#tasks');a.$('[data-task-copy]').click();a.submit({});
+  assert.equal(a.run('data.tasks.length'),2);assert.equal(a.run('data.tasks[1].done'),false);assert.equal(a.run('data.tasks[1].examId'),undefined);assert.equal(a.run('data.tasks[1].notes'),'Keep this note');assert.equal(a.run('data.tasks[0].done'),true);
+});
+
+test('task-to-plan shortcut copies context and brings overdue dates forward',()=>{
+  const a=workspace();a.task('Essay practice');a.run("mutate(()=>Object.assign(data.tasks[0],{date:dateAfter(-2),notes:'Outline first'}))");a.route('#tasks');a.$('[data-task-plan]').click();assert.equal(a.$('#f-title').value,'Essay practice');assert.equal(a.$('#f-date').value,a.run('today()'));a.submit({});
+  assert.equal(a.run('data.plans.length'),1);assert.equal(a.run('data.plans[0].notes'),'Outline first');assert.equal(a.run('data.tasks[0].done'),false);
+});
+
+test('task ordering supports priority and local search includes notes',()=>{
+  const a=workspace();a.task('Normal');a.task('Urgent');a.run("mutate(()=>Object.assign(data.tasks[1],{date:dateAfter(4),priority:'紧急',notes:'Momentum review'}))");a.route('#tasks');assert.equal(a.$('#list .row-title').textContent,'Normal');a.$('#task-sort').value='priority';a.$('#task-sort').onchange({target:a.$('#task-sort')});assert.equal(a.$('#list .row-title').textContent,'Urgent');
+  a.$('#search').value='Momentum';a.$('#search').oninput({target:a.$('#search')});assert.equal(a.$('#list').querySelectorAll('.task-row').length,1);assert.equal(a.$('#list .row-title').textContent,'Urgent');
+});
+
+test('filtered learning lists explain empty results and support clearing filters',()=>{
+  const a=workspace();a.run("add('logs')");a.submit({title:'Physics',notes:'Momentum'});a.route('#logs');a.$('#search').value='Not found';a.$('#search').oninput({target:a.$('#search')});assert.ok(a.$('#list').textContent.includes('没有符合条件'));
+  a.$('#clear-filters').click();assert.ok(a.$('#list').textContent.includes('Physics'));a.$('#search').value='Momentum';a.$('#search').oninput({target:a.$('#search')});assert.ok(a.$('#list').textContent.includes('Physics'));
+});
+
+test('more navigation closes on same-page link, outside click and Escape',()=>{
+  const a=workspace();a.route('#review');assert.ok(a.$('#dock-more').classList.contains('active'));a.$('#dock-more').click();assert.equal(a.$('#dock-more').getAttribute('aria-expanded'),'true');
+  a.$('#nav a[href="#review"]').click();assert.equal(a.$('#dock-more').getAttribute('aria-expanded'),'false');
+  a.$('#dock-more').click();a.$('#app h1').click();assert.equal(a.$('#menu-toggle').getAttribute('aria-expanded'),'false');
+  a.$('#dock-more').click();const event=new a.document.defaultView.Event('keydown');Object.defineProperty(event,'key',{value:'Escape'});a.document.dispatchEvent(event);assert.equal(a.$('#dock-more').getAttribute('aria-expanded'),'false');
+});
+
+test('skip-link preserves the current route and navigation clears batch selection',()=>{
+  const a=workspace();a.route('#grades');let prevented=false;a.$('.skip-link').onclick({preventDefault(){prevented=true}});assert.equal(prevented,true);assert.equal(a.run('page'),'grades');assert.equal(a.run('location.hash'),'#grades');
+  a.task();a.route('#tasks');a.$('#enable-task-bulk').click();a.$('#select-visible-tasks').click();a.run("location.hash='#library'");a.events.hashchange();assert.equal(a.run('taskBulkMode'),false);assert.equal(a.run('taskSelection.size'),0);
+});
+
+test('weekly planner actual time excludes future-dated learning logs',()=>{
+  const a=workspace();a.clock.now=new Date(2026,10,4,12).getTime();a.run("add('logs')");a.submit({title:'Today',date:'2026-11-04',minutes:30});a.run("add('logs')");a.submit({title:'Future',date:'2026-11-06',minutes:90});a.route('#planner');assert.ok(a.$('.weekly-meter strong').textContent.trim().startsWith('30'));
+});
+
+test('a cross-tab refresh removes stale undo actions before they can alter newer data',()=>{
+  const memory=new Map(),a=workspace(memory);a.task('First');a.route('#tasks');a.$('#enable-task-bulk').click();a.$('#select-visible-tasks').click();a.$('#complete-selected-tasks').click();assert.ok(a.$('#toast-action'));
+  const b=workspace(memory);b.task('Newer work');a.events.storage({key:KEY});assert.equal(a.$('#toast-action'),null);assert.equal(a.run('data.tasks.length'),2);assert.equal(a.run('data.tasks.find(t=>t.title==="First").done'),true);
+});

@@ -58,7 +58,7 @@ function studyEditor(kind,id,defaults={}) {
 function plannerView() {
   const dates=weekDates(),plans=data.plans.filter(p=>dates.includes(p.date));
   const total=plans.reduce((n,p)=>n+p.minutes,0),done=plans.filter(p=>p.done).length;
-  const actual=data.logs.filter(l=>dates.includes(l.date)).reduce((n,l)=>n+l.minutes,0),goal=data.profile.weeklyGoal??300;
+  const actual=data.logs.filter(l=>dates.includes(l.date)&&l.date<=today()).reduce((n,l)=>n+l.minutes,0),goal=data.profile.weeklyGoal??300;
   return head('为学习，留出时间。','先安排可以开始的一小步。完成计划后，可直接记录真实学习时间。')+
     `<section class="planner-banner"><div><span class="eyebrow">A WEEK WITH INTENTION</span><h2>不必排满，留一点余地。</h2><p>计划时间帮助你安排，学习日志记录实际投入。</p><button class="primary" data-study-add="plan">＋ 安排学习</button></div><div class="weekly-meter"><span>${plannerOffset===0?'本周':'所选周'}目标进度</span><strong>${actual}<small> / ${goal} 分钟</small></strong><div class="progress"><i style="width:${Math.min(100,actual/goal*100)}%"></i></div><a href="#settings">调整每周目标 ↗</a></div></section>
     <div class="week-toolbar"><div class="toolbar"><button id="week-prev" aria-label="上一周">←</button><h2>${dates[0]} — ${dates[6]}</h2><button id="week-next" aria-label="下一周">→</button><button class="outline" id="week-now">本周</button></div><span class="sub">已完成 ${done}/${plans.length} 项 · 计划 ${total} 分钟</span></div>
