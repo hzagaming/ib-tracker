@@ -26,7 +26,7 @@ function taskDateLabel(t){
   return '待完成';
 }
 function renderTaskRows(items){
-  return items.length?items.map(t=>`<div class="row task-row"><input class="check" type="checkbox" aria-label="${taskBulkMode?'选择':'完成'} ${esc(t.title)}" ${taskBulkMode?'data-task-select':'data-check'}="${t.id}" ${(taskBulkMode?taskSelection.has(t.id):t.done)?'checked':''}><div class="row-body"><a href="#" data-edit="tasks:${t.id}" class="row-title ${t.done?'done':''}">${esc(t.title)}</a><small>${esc(subjectName(t.subject))} · ${t.date} · <span class="task-date ${!t.done&&t.date<today()?'overdue':''}">${taskDateLabel(t)}</span></small></div><span class="tag ${t.priority==='紧急'?'orange':''}">${esc(t.type)} · ${esc(t.priority)}</span><details class="task-menu"><summary aria-label="${esc(t.title)}的更多操作">⋯</summary><div class="task-menu-panel"><button type="button" data-task-edit="${t.id}">编辑任务</button>${!t.done?`<button type="button" data-task-tomorrow="${t.id}">改到明天</button><button type="button" data-task-plan="${t.id}">安排一段学习</button>`:''}<button type="button" data-task-copy="${t.id}">复制为新任务</button><button type="button" data-delete="tasks:${t.id}">删除任务</button></div></details></div>`).join(''):empty('给下一步，留一个位置','添加作业、复习计划或即将到来的考试。');
+  return items.length?items.map(t=>`<div class="row task-row"><input class="check" type="checkbox" aria-label="${taskBulkMode?'选择':'完成'} ${esc(t.title)}" ${taskBulkMode?'data-task-select':'data-check'}="${t.id}" ${(taskBulkMode?taskSelection.has(t.id):t.done)?'checked':''}><div class="row-body"><a href="#" data-edit="tasks:${t.id}" class="row-title ${t.done?'done':''}">${esc(t.title)}</a><small>${esc(subjectName(t.subject))} · ${t.date} · <span class="task-date ${!t.done&&t.date<today()?'overdue':''}">${taskDateLabel(t)}</span></small></div><span class="tag ${t.priority==='紧急'?'orange':''}">${esc(t.type)} · ${esc(t.priority)}</span><details class="task-menu"><summary aria-label="${esc(t.title)}的更多操作">⋯</summary><div class="task-menu-panel"><button type="button" data-task-edit="${t.id}">编辑任务</button>${!t.done?`<button type="button" data-task-tomorrow="${t.id}">改到明天</button><button type="button" data-task-focus="${t.id}">开始专注</button><button type="button" data-task-plan="${t.id}">安排一段学习</button>`:''}<button type="button" data-task-copy="${t.id}">复制为新任务</button><button type="button" data-delete="tasks:${t.id}">删除任务</button></div></details></div>`).join(''):empty('给下一步，留一个位置','添加作业、复习计划或即将到来的考试。');
 }
 function resetTaskSelection(){taskBulkMode=false;taskSelection.clear();taskVisibleIds=[]}
 function taskBulkToolbar(){
@@ -55,6 +55,7 @@ function planTask(id){
   studyEditor('plan',null,{title:t.title,subject:t.subject,date:t.date<today()?today():t.date,minutes:30,notes:t.notes||''});
 }
 function bindTaskTools(){
+  document.querySelectorAll('[data-task-focus]').forEach(el=>el.onclick=()=>prepareFocus('tasks',el.dataset.taskFocus));
   document.querySelectorAll('[data-task-tab]').forEach(el=>el.onclick=()=>{status=el.dataset.taskTab;taskSelection.clear();render()});
   document.querySelectorAll('[data-task-select]').forEach(el=>el.onchange=()=>{const id=el.dataset.taskSelect;if(el.checked)taskSelection.add(id);else taskSelection.delete(id);renderList();document.querySelector('[data-task-select="'+id+'"]')?.focus?.({preventScroll:true})});
   document.querySelectorAll('[data-task-tomorrow]').forEach(el=>el.onclick=()=>changeTasks([el.dataset.taskTomorrow],'date',dateAfter(1)));
@@ -82,7 +83,7 @@ function bindExperience(){
   if(more)more.onclick=toggle;
   if($('.skip-link'))$('.skip-link').onclick=e=>{e.preventDefault();$('#app')?.focus?.({preventScroll:true});$('#app')?.scrollIntoView?.({block:'start'})};
   if($('#task-sort')){$('#task-sort').value=taskSort;$('#task-sort').onchange=e=>{taskSort=e.target.value;renderList()}};
-  bindTaskTools();
+  bindTaskTools();bindFocus();
 }
 
 let calendarMode='month',calendarSubject='',calendarKind='',calendarStatus='all',calendarDay='';

@@ -506,3 +506,123 @@ test('calendar keyboard navigation crosses months and clamps page navigation to 
   press('2024-02-29','Home');assert.equal(a.run('calendarDay'),'2024-02-26');press('2024-02-26','End');assert.equal(a.run('calendarDay'),'2024-03-03');
   const days=[...a.document.querySelectorAll('[data-calendar-day]')];assert.equal(days.filter(el=>el.getAttribute('tabindex')==='0').length,1);assert.equal(a.$('[data-calendar-day="2024-03-03"]').getAttribute('tabindex'),'0');
 });
+
+test('focus durations, context and paused progress survive reloads without counting the pause',()=>{
+  const a=workspace(),subject=a.subject();a.route('#focus');
+  a.$('#focus-title').value='Practise momentum';a.$('#focus-subject').value=subject;a.$('[data-focus-duration="45"]').click();
+  assert.equal(a.run('timer.duration'),2700);a.$('#timer-start').click();assert.equal(a.$('#focus-title').disabled,true);
+  a.clock.now+=125000;a.$('#timer-start').click();assert.equal(a.run('timer.remaining'),2575);
+  a.clock.now+=600000;a.$('#timer-start').click();a.clock.now+=60000;a.$('#timer-start').click();assert.equal(a.run('timer.remaining'),2515);
+  const b=workspace(a.memory);b.route('#focus');assert.equal(b.$('#focus-title').value,'Practise momentum');assert.equal(b.$('#focus-subject').value,subject);
+  assert.equal(b.$('#timer-display').textContent,'41:55');assert.equal(b.run('timer.duration'),2700);assert.equal(b.run('timer.running'),false);
+});
+
+test('focus custom durations reject invalid numbers and save the actual elapsed time',()=>{
+  const a=workspace();a.route('#focus');
+  for(const value of ['',0,-1,1.5,481]){a.$('#focus-minutes').value=String(value);a.$('#focus-minutes').onchange();assert.equal(a.run('timer.duration'),1500)}
+  a.$('#focus-minutes').value='2';a.$('#focus-minutes').onchange();a.$('#timer-start').click();a.clock.now+=120000;a.ticks[0]();
+  assert.equal(a.$('#timer-display').textContent,'00:00');assert.equal(a.$('#timer-start').disabled,true);a.$('#timer-save').click();assert.equal(a.$('#f-minutes').value,'2');a.submit({title:'Two minute recap'});
+  assert.equal(a.run('data.logs[0].minutes'),2);assert.equal(a.run('timer.duration'),120);assert.equal(a.run('timer.remaining'),120);
+});
+
+test('focus title validation prevents an empty goal from starting the timer',()=>{
+  const a=workspace();a.route('#focus');a.$('#focus-title').value='  ';a.$('#timer-start').click();assert.equal(a.run('timer.running'),false);
+  a.$('#focus-title').value='One small step';a.$('#timer-start').click();assert.equal(a.run('timer.running'),true);
+});
+
+test('focus bar stays available across pages and supports pausing and saving',()=>{
+  const a=workspace();a.route('#focus');a.$('#focus-title').value='Evidence analysis';a.$('#timer-start').click();a.clock.now+=180000;
+  a.route('#library');assert.equal(a.$('#focus-session-bar').hidden,false);assert.equal(a.$('#focus-bar-title').textContent,'Evidence analysis');assert.equal(a.$('#focus-bar-time').textContent,'22:00');
+  a.$('#focus-bar-toggle').click();assert.equal(a.run('timer.running'),false);a.clock.now+=120000;a.ticks[0]();assert.equal(a.$('#focus-bar-time').textContent,'22:00');
+  a.$('#focus-bar-save').click();assert.equal(a.$('#f-minutes').value,'3');a.submit({notes:'Check the counterargument'});assert.equal(a.$('#focus-session-bar').hidden,true);assert.equal(a.run('data.logs[0].title'),'Evidence analysis');
+});
+
+test('starting focus from a task preserves context and never completes the task automatically',()=>{
+  const a=workspace(),subject=a.subject(),id=a.task('Timed practice');
+  a.run(`data.tasks[0].subject=${JSON.stringify(subject)};data.tasks[0].notes='Bring the formula booklet';save()`);a.route('#tasks');
+  a.$('[data-task-focus="'+id+'"]').click();a.events.hashchange();assert.equal(a.run('page'),'focus');assert.equal(a.$('#focus-title').value,'Timed practice');assert.equal(a.$('#focus-subject').value,subject);
+  a.$('#timer-start').click();a.clock.now+=240000;a.$('#timer-save').click();assert.equal(a.$('#f-notes').value,'Bring the formula booklet');a.submit({});
+  assert.equal(a.run('data.logs[0].subject'),subject);assert.equal(a.run('data.tasks[0].done'),false);
+});
+
+test('task focus shortcuts are rebound after list filtering and subject shortcuts select the course',()=>{
+  const a=workspace(),subject=a.subject(),id=a.task('Focused task');a.route('#tasks');a.$('#search').value='Focused';a.$('#search').oninput({target:a.$('#search')});
+  a.$('[data-task-focus="'+id+'"]').click();assert.equal(a.run('timer.title'),'Focused task');
+  a.route('#subject/'+subject);a.$('[data-focus-subject="'+subject+'"]').click();a.events.hashchange();assert.equal(a.$('#focus-subject').value,subject);assert.ok(a.$('#focus-title').value.includes('Physics'));
+});
+
+test('reset and target changes require keeping or explicitly discarding unfinished progress',()=>{
+  const a=workspace(),id=a.task('Next task');a.route('#focus');a.$('#timer-start').click();a.clock.now+=120000;const session=a.run('timer.session');
+  a.run('confirm=()=>false');a.$('#timer-reset').click();assert.equal(a.run('timer.session'),session);assert.equal(a.run('timer.running'),true);
+  a.run(`prepareFocus('tasks',${JSON.stringify(id)})`);assert.equal(a.run('timer.session'),session);
+  a.run('confirm=()=>true');a.$('#timer-reset').click();assert.notEqual(a.run('timer.session'),session);assert.equal(a.run('timer.running'),false);assert.equal(a.$('#focus-title').disabled,false);
+});
+
+test('focus session dates use the start day when the clock crosses midnight',()=>{
+  const a=workspace();a.clock.now=new Date(2026,10,12,23,58).getTime();a.route('#focus');a.$('#timer-start').click();a.clock.now+=300000;a.$('#timer-save').click();
+  assert.equal(a.$('#f-date').value,'2026-11-12');assert.equal(a.$('#f-minutes').value,'5');a.submit({});assert.equal(a.run('data.logs[0].date'),'2026-11-12');
+});
+
+test('stale timer actions detect another tab without waiting for a storage event',()=>{
+  const a=workspace();a.route('#focus');a.$('#timer-start').click();const session=a.run('timer.session');
+  const b=workspace(a.memory);b.route('#focus');b.clock.now=a.clock.now+120000;b.$('#timer-start').click();const remote=a.memory.get('ib-atlas-timer');
+  a.$('#timer-reset').click();assert.equal(a.memory.get('ib-atlas-timer'),remote);assert.equal(a.run('timer.running'),false);assert.equal(a.run('timer.remaining'),1380);assert.equal(a.run('timer.session'),session);
+});
+
+test('cross-tab timer updates preserve the log draft and reject its stale session',()=>{
+  const a=workspace();a.route('#focus');a.$('#timer-start').click();a.clock.now+=180000;a.$('#timer-save').click();a.$('#f-notes').value='Unsubmitted reflection';
+  const b=workspace(a.memory);b.route('#focus');b.$('#timer-reset').click();a.events.storage({key:'ib-atlas-timer'});
+  assert.equal(a.$('#modal').open,true);assert.equal(a.$('#f-notes').value,'Unsubmitted reflection');a.submit({});assert.equal(a.run('data.logs.length'),0);assert.equal(a.$('#modal').open,true);assert.ok(a.$('#form-error').textContent.includes('草稿仍保留'));
+});
+
+test('focus log retries retain the same session and duplicate save attempts do not add records',()=>{
+  const a=workspace();a.route('#focus');a.$('#timer-start').click();a.clock.now+=180000;a.$('#timer-save').click();const session=a.run('timer.session');
+  a.fault.data=true;a.submit({notes:'Still here'});assert.equal(a.run('data.logs.length'),0);assert.equal(a.run('timer.session'),session);
+  a.fault.data=false;a.submit({});assert.equal(a.run('data.logs.length'),1);assert.equal(a.run('data.logs[0].focusSession'),session);
+  a.run(`timer={...freshTimer(),session:${JSON.stringify(session)},remaining:1200};persistTimer();saveFocus()`);a.submit({});assert.equal(a.run('data.logs.length'),1);assert.ok(a.$('#form-error').textContent.includes('已记录'));
+});
+
+test('saved focus records refresh another tab and prevent an old countdown from returning',()=>{
+  const a=workspace();a.route('#focus');a.$('#timer-start').click();const b=workspace(a.memory);b.route('#library');const session=b.run('timer.session');
+  a.clock.now+=180000;a.$('#timer-save').click();a.submit({});b.events.storage({key:KEY});
+  assert.notEqual(b.run('timer.session'),session);assert.equal(b.$('#focus-session-bar').hidden,true);assert.equal(b.run('data.logs.length'),1);
+});
+
+test('timer storage migration accepts old sessions and rejects damaged extended state',()=>{
+  const memory=new Map([['ib-atlas-timer',JSON.stringify({remaining:1200,running:false,end:0})]]),a=workspace(memory);
+  assert.equal(a.run('timer.duration'),1500);assert.equal(a.run('timer.remaining'),1200);assert.equal(a.run('timer.title'),'专注学习');
+  for(const invalid of [{duration:0},{duration:28801},{title:' '},{subject:'invalid id'},{date:'2026-02-30'},{remaining:1501},{notes:42}]){
+    memory.set('ib-atlas-timer',JSON.stringify({remaining:1200,running:false,end:0,...invalid}));const b=workspace(memory);assert.equal(b.run('timer.remaining'),1500);assert.equal(b.run('timer.running'),false);
+  }
+});
+
+test('focus timer persistence failures keep the current session usable in memory',()=>{
+  const a=workspace();a.route('#focus');a.fault.timer=true;a.$('#timer-start').click();a.clock.now+=120000;a.$('#timer-start').click();assert.equal(a.run('timer.remaining'),1380);
+  a.$('#timer-save').click();a.submit({title:'Saved despite timer storage failure'});assert.equal(a.run('data.logs[0].minutes'),2);assert.equal(a.run('timer.remaining'),1500);
+});
+
+test('focus history counts only saved sessions from today and handles removed subjects',()=>{
+  const a=workspace(),subject=a.subject();a.route('#subject/'+subject);a.$('[data-focus-subject="'+subject+'"]').click();a.events.hashchange();a.$('#timer-start').click();a.clock.now+=180000;a.$('#timer-save').click();a.submit({});
+  a.run(`data.logs.push({id:'ordinary-log',title:'Manual study',subject:'',date:today(),minutes:90,notes:''});deleteRecord('subjects',${JSON.stringify(subject)});location.hash='#focus';render()`);
+  assert.ok(a.$('.focus-today').textContent.includes('3'));assert.ok(a.$('.focus-today').textContent.includes('1 次已记录'));assert.equal(a.$('#focus-subject').value,'');
+  const b=workspace(a.memory);assert.equal(b.run('timer.subject'),'');
+});
+
+test('unstarted focus setup drafts survive quick-add saves and ordinary rerenders',()=>{
+  const a=workspace(),subject=a.subject();a.route('#focus');a.$('#focus-title').value='Unfinished goal draft';a.$('#focus-subject').value=subject;a.$('#focus-minutes').value='37';a.$('#focus-title').oninput();
+  a.$('#quick-add').click();a.$('[data-quick="tasks"]').click();a.submit({title:'An unrelated task'});
+  assert.equal(a.$('#focus-title').value,'Unfinished goal draft');assert.equal(a.$('#focus-subject').value,subject);assert.equal(a.$('#focus-minutes').value,'37');
+  a.$('#timer-start').click();assert.equal(a.run('timer.title'),'Unfinished goal draft');assert.equal(a.run('timer.duration'),2220);
+});
+
+test('a new focus target replaces the previous unstarted setup draft',()=>{
+  const a=workspace(),id=a.task('New target');a.route('#focus');a.$('#focus-title').value='Old unsaved goal';a.$('#focus-title').oninput();
+  a.run(`prepareFocus('tasks',${JSON.stringify(id)})`);assert.equal(a.$('#focus-title').value,'New target');assert.equal(a.run('timer.title'),'New target');
+});
+
+test('resuming the same session in another tab cannot be cleared by saving an older log draft',()=>{
+  const a=workspace();a.route('#focus');a.$('#timer-start').click();a.clock.now+=180000;a.$('#timer-save').click();const session=a.run('timer.session');
+  const b=workspace(a.memory);b.route('#focus');b.$('#timer-start').click();const remote=a.memory.get('ib-atlas-timer');a.events.storage({key:'ib-atlas-timer'});
+  assert.equal(a.run('timer.session'),session);assert.equal(a.run('timer.running'),true);a.submit({notes:'Older draft'});
+  assert.equal(a.run('data.logs.length'),0);assert.equal(a.memory.get('ib-atlas-timer'),remote);assert.equal(a.$('#f-notes').value,'Older draft');assert.equal(a.$('#modal').open,true);
+});

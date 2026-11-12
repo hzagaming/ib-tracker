@@ -4163,3 +4163,218 @@ h1[tabindex="-1"]:focus {
     flex: 1 1 40%;
   }
 }
+
+/* Focus keeps its controls and context together on every screen. */
+.focus-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.focus-workspace {
+  text-align: center;
+  padding: 32px;
+}
+.focus-context {
+  text-align: left;
+  max-width: 520px;
+  margin: 24px auto;
+}
+.focus-context label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin: 16px 0 8px;
+}
+.focus-duration {
+  max-width: 520px;
+  margin: auto;
+}
+#focus-duration-label {
+  display: block;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.focus-presets {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.focus-presets button {
+  padding: 10px 4px;
+  background: #ffffff;
+  border: 1px solid #dddddd;
+  color: #111111;
+}
+.focus-presets button.selected {
+  background: #111111;
+  border-color: #111111;
+  color: #ffffff;
+}
+.focus-custom {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  margin: 16px 0 0;
+  color: #626262;
+}
+.focus-custom input {
+  width: 80px;
+  text-align: center;
+}
+.focus-workspace .focus-orbit {
+  margin: 26px auto 18px;
+  width: min(260px, 100%);
+  height: auto;
+  aspect-ratio: 1;
+}
+.focus-workspace #timer-display {
+  font-size: clamp(44px, 5vw, 62px);
+  font-variant-numeric: tabular-nums;
+}
+#focus-status {
+  color: #626262;
+  font-size: 13px;
+  min-height: 20px;
+}
+.focus-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin: 22px 0;
+}
+.focus-context :disabled,
+.focus-custom :disabled {
+  background: #f5f5f5;
+  color: #626262;
+  cursor: default;
+}
+.focus-presets button:disabled {
+  cursor: default;
+}
+.focus-reflection h2 {
+  margin-top: 14px;
+}
+.focus-today {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 24px 0 16px;
+}
+.focus-today strong {
+  font-size: 44px;
+  letter-spacing: -2px;
+}
+.focus-today small,
+.focus-today > span {
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: normal;
+  color: #626262;
+}
+.focus-checklist {
+  margin: 28px 0;
+  padding: 20px 0;
+  border-top: 1px solid #dddddd;
+  border-bottom: 1px solid #dddddd;
+}
+.focus-checklist p {
+  font-size: 13px;
+  color: #626262;
+  line-height: 1.8;
+}
+.focus-reflection .row {
+  flex-wrap: wrap;
+}
+.focus-session-bar {
+  position: sticky;
+  top: 12px;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  margin-bottom: 24px;
+  background: #ffffff;
+  color: #111111;
+  border: 1px solid #111111;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px #00000010;
+}
+.focus-session-bar[hidden] {
+  display: none;
+}
+.focus-bar-link {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 16px;
+  flex: 1;
+  min-width: 0;
+  color: #111111;
+  text-decoration: none;
+}
+.focus-bar-link .eyebrow {
+  grid-column: 1 / -1;
+  color: #626262;
+}
+#focus-bar-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+#focus-bar-time {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.focus-session-bar button {
+  flex-shrink: 0;
+}
+@media (max-width: 1100px) {
+  .focus-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 650px) {
+  .focus-workspace {
+    padding: 22px 16px;
+  }
+  .focus-workspace .focus-orbit {
+    width: 210px;
+  }
+  .focus-actions .primary,
+  .focus-actions .outline {
+    flex: 1 1 42%;
+  }
+  .focus-presets {
+    gap: 6px;
+  }
+  .focus-presets button {
+    font-size: 12px;
+  }
+  .focus-session-bar {
+    top: 8px;
+    padding: 10px;
+    gap: 8px;
+  }
+  .focus-session-bar button {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+  .focus-bar-link {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
+  .focus-bar-link .eyebrow {
+    display: none;
+  }
+  #focus-bar-time {
+    font-size: 16px;
+  }
+}
