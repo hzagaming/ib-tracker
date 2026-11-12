@@ -15,7 +15,7 @@ try {
 let page='dashboard',filter='',status='all',subjectFilter='',priorityFilter='',selectedSubject='';
 let undoSnapshot=null,focusDraft=false,profileDirty=false,revertingProfileNavigation=false;
 let calendarMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);
-const nav=[['dashboard','◫','学习总览'],['subjects','▦','我的学科'],['tasks','✓','任务与计划'],['planner','▥','每周学习计划'],['exams','▣','考试冲刺'],['reflections','✧','每周复盘'],['review','↻','复习中心'],['library','▧','学习资料库'],['mistakes','✎','错题本'],['analytics','◴','学习分析'],['search','⌕','搜索记录'],['calendar','▦','截止日期月历'],['logs','▤','学习日志'],['grades','↗','成绩追踪'],['core','◇','核心项目'],['focus','◷','专注时光'],['settings','⚙','个人设置']];
+const nav=[['dashboard','◫','学习总览'],['subjects','▦','我的学科'],['tasks','✓','任务与计划'],['planner','▥','每周学习计划'],['exams','▣','考试冲刺'],['reflections','✧','每周复盘'],['review','↻','复习中心'],['library','▧','学习资料库'],['mistakes','✎','错题本'],['analytics','◴','学习分析'],['search','⌕','搜索记录'],['calendar','▦','学习日程'],['logs','▤','学习日志'],['grades','↗','成绩追踪'],['core','◇','核心项目'],['focus','◷','专注时光'],['settings','⚙','个人设置']];
 const groups=[['语言与文学','Chinese A: Literature','Chinese A: Language and Literature','English A: Literature','English A: Language and Literature','Language A: Literature（自选语言）','Language A: Language and Literature（自选语言）','Literature and Performance'],['语言习得','English B','Chinese B','French B','Spanish B','French ab initio','Spanish ab initio','Language B（自选语言）','Language ab initio（自选语言）','Latin','Classical Greek'],['个体与社会','Economics','Business Management','History','Geography','Psychology','Global Politics','Digital Society','Philosophy','Social and Cultural Anthropology','World Religions'],['科学','Biology','Chemistry','Physics','Computer Science','Design Technology','Sports, Exercise and Health Science','Environmental Systems and Societies'],['数学','Mathematics: Analysis and Approaches','Mathematics: Applications and Interpretation'],['艺术','Visual Arts','Music','Theatre','Film','Dance']];
 function save({recover=false}={}) {
   if(recoveryRaw!==null&&!recover){toast('原有数据无法读取，请先导出恢复文件或导入有效备份。');return false}
@@ -206,7 +206,7 @@ function subjectDetail() {
   const s = data.subjects.find(s => s.id === selectedSubject);
   if (!s) return head('没有找到这门科目', '<a href="#subjects">返回我的学科 ↗</a>');
   const topics = data.topics.filter(t => t.subject === s.id);
-  const logs = data.logs.filter(l => l.subject === s.id);
+  const logs = data.logs.filter(l => l.subject === s.id && l.date <= today());
   const grades = data.grades.filter(g => g.subject === s.id).reverse().sort((a,b)=>b.date.localeCompare(a.date));
   const tasks = data.tasks.filter(t => t.subject === s.id && !t.done).sort((a,b)=>a.date.localeCompare(b.date));
   return head(esc(s.name), `${s.level} · ${groups[s.group][0]} · 目标 ${s.target} / 7`) +
@@ -217,20 +217,8 @@ function subjectDetail() {
     <div class="grid" style="margin-top:22px"><section class="panel"><div class="panel-head"><h2>待办任务</h2><button class="text-button" id="subject-task">＋ 添加</button></div>${taskRows(tasks)}</section><section class="panel"><h2>学科笔记</h2><div class="note">${esc(s.notes) || '点击「编辑学科与笔记」写下你的复习重点。'}</div></section></div>
     <div class="grid"><section class="panel"><h2>最近学习</h2>${logs.slice().reverse().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5).map(x=>recordRow(x,'logs')).join('') || empty('还没有学习记录','学习后，留下一点收获。')}</section><section class="panel"><h2>成绩与反馈</h2>${grades.slice(0,5).map(x=>recordRow(x,'grades')).join('') || empty('还没有测评记录','记录真实成绩与改进方向。')}</section></div>`;
 }
-function calendarView() {
-  const year=calendarMonth.getFullYear(), month=calendarMonth.getMonth();
-  const first=new Date(year,month,1), offset=(first.getDay()+6)%7;
-  const count=new Date(year,month+1,0).getDate();
-  const cells=Array.from({length:Math.ceil((offset+count)/7)*7},(_,i)=>{
-    const day=i-offset+1;
-    if(day<1||day>count)return '<div class="calendar-cell inactive" aria-hidden="true"></div>';
-    const date=`${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-    const items=[...data.tasks.filter(t=>t.date===date).map(t=>({...t,kind:'tasks',label:t.type})),...data.core.filter(t=>t.date===date).map(t=>({...t,kind:'core',label:t.type})),...data.exams.filter(t=>t.date===date).map(t=>({...t,kind:'exams',label:'考试',done:t.status==='已完成'}))];
-    return `<div class="calendar-cell ${date===today()?'is-today':''}"><span class="date-number">${day}</span>${items.map(t=>`<button class="calendar-item ${t.done||t.stage==='已完成'?'completed':''}" data-edit="${t.kind}:${t.id}" title="${esc(t.title)}">${esc(t.label)} · ${esc(t.title)}</button>`).join('')}${!items.length?'<span class="calendar-free">—</span>':''}</div>`;
-  });
-  return head('截止日期月历','把作业、考试和核心项目的时间放在一起。','添加任务','tasks')+
-    `<div class="panel"><div class="panel-head"><div class="toolbar"><button id="month-prev" aria-label="上个月">←</button><h2>${year} 年 ${month+1} 月</h2><button id="month-next" aria-label="下个月">→</button></div><button class="outline" id="month-today">本月</button></div><div class="calendar-scroll"><div class="calendar">${['一','二','三','四','五','六','日'].map(d=>`<div class="calendar-day">周${d}</div>`).join('')}${cells.join('')}</div></div><p class="sub">点击日程可编辑。已完成记录以浅色显示。</p></div>`;
-}
+function calendarView() {return buildCalendarView()}
+
 function gradeSummary() {
   if (!data.subjects.length) return '';
   return `<div class="panel" style="margin-bottom:20px"><h2>各科学习表现</h2>${data.subjects.map(s=>{
@@ -247,8 +235,6 @@ function bindEnhancements() {
   document.querySelectorAll('[data-topic]').forEach(el=>el.onclick=e=>{e.preventDefault();topicEditor(selectedSubject,el.dataset.topic)});
   document.querySelectorAll('[data-topic-status]').forEach(el=>el.onchange=()=>{mutate(()=>{const t=data.topics.find(t=>t.id===el.dataset.topicStatus);t.status=el.value;if(el.value==='mastered')t.reviewActive=false});render()});
   if($('#subject-task'))$('#subject-task').onclick=()=>{add('tasks');$('#f-subject').value=selectedSubject};
-  for(const [id,delta] of [['month-prev',-1],['month-next',1]])if($('#'+id))$('#'+id).onclick=()=>{calendarMonth=new Date(calendarMonth.getFullYear(),calendarMonth.getMonth()+delta,1);render()};
-  if($('#month-today'))$('#month-today').onclick=()=>{calendarMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);render()};
   for(const [id,value,update] of [['subject-filter',subjectFilter,v=>subjectFilter=v],['priority-filter',priorityFilter,v=>priorityFilter=v]])if($('#'+id)){$('#'+id).value=value;$('#'+id).onchange=e=>{update(e.target.value);renderList()}};
 }
 
@@ -270,8 +256,9 @@ function taskTabs() {
 function dashboardView() {
   const pending=data.tasks.filter(t=>!t.done).sort((a,b)=>a.date.localeCompare(b.date));
   const due=pending.filter(t=>t.date<=today());
-  const reviews=data.topics.filter(t=>t.status!=='mastered'&&t.review&&t.review<=today()).sort((a,b)=>a.review.localeCompare(b.review));
-  const mins=data.logs.reduce((n,l)=>n+l.minutes,0);
+  const reviews=data.topics.filter(t=>scheduledReview(t)&&t.review<=today()).sort((a,b)=>a.review.localeCompare(b.review));
+  const actualLogs=data.logs.filter(l=>l.date<=today());
+  const mins=actualLogs.reduce((n,l)=>n+l.minutes,0);
   const weekStart=new Date();weekStart.setDate(weekStart.getDate()-6);
   const weekMinutes=data.logs.filter(l=>l.date>=localDate(weekStart)&&l.date<=today()).reduce((n,l)=>n+l.minutes,0);
   const days=daysUntil(data.profile.exam);
@@ -280,7 +267,7 @@ function dashboardView() {
   return head(`${name}今天，向前一步。`,new Date().toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'})+' · 你的学习，由你掌握。','记录学习','logs')+
   `<section class="today-hero"><div class="hero-copy"><span class="eyebrow">YOUR DAILY COMPASS</span><h2>${due.length?'先做好今天重要的事。':reviews.length?'给学过的知识，再一次相遇。':'留一点时间，给自己的进步。'}</h2><p>${due.length?`有 ${due.length} 项任务需要关注，${reviews.length} 个知识点等待复习。`:reviews.length?`有 ${reviews.length} 个知识点已到复习日期，温故也在前进。`:'你的日程还有空间。安排一个小目标，或开启一段专注。'}</p><div class="hero-actions"><a class="primary button-link" href="${due.length?'#tasks':'#focus'}">${due.length?'查看待办任务':'开始 25 分钟专注'} ↗</a><button class="hero-secondary" data-add="tasks">＋ 安排任务</button></div></div><div class="hero-summary"><span class="hero-mark">✳︎</span><span class="eyebrow">LAST 7 DAYS</span><strong>${(weekMinutes/60).toFixed(1)}<small>小时</small></strong><span>每一份投入，都算数。</span></div></section>
   ${progressDashboard()}${onboarding?`<section class="getting-started"><div><span class="eyebrow">MAKE IT YOURS</span><h3>三小步，建立你的学习空间</h3></div><div class="setup-steps"><button data-add="subjects" class="${data.subjects.length?'step-done':''}"><span>${data.subjects.length?'✓':'1'}</span>添加你的学科</button><button data-add="tasks" class="${data.tasks.length?'step-done':''}"><span>${data.tasks.length?'✓':'2'}</span>安排第一项任务</button><button data-add="logs" class="${data.logs.length?'step-done':''}"><span>${data.logs.length?'✓':'3'}</span>记录一次学习</button></div></section>`:''}
-  <div class="stats"><a class="stat" href="#logs"><span class="stat-label">累计学习</span><strong>${(mins/60).toFixed(1)} <small>小时</small></strong><small>${data.logs.length} 次投入 ↗</small></a><a class="stat" href="#tasks"><span class="stat-label">待完成任务</span><strong>${pending.length} <small>项</small></strong><small>${pending.filter(t=>t.date<today()).length} 项逾期 ↗</small></a><a class="stat" href="#subjects"><span class="stat-label">我的学科</span><strong>${data.subjects.length} <small>/ 6</small></strong><small>${data.subjects.filter(s=>s.level==='HL').length} HL · ${data.subjects.filter(s=>s.level==='SL').length} SL ↗</small></a><a class="stat" href="#settings"><span class="stat-label">目标考试倒计时</span><strong>${days} <small>天</small></strong><small>${esc(data.profile.exam)} · 修改 ↗</small></a></div>
+  <div class="stats"><a class="stat" href="#logs"><span class="stat-label">累计学习</span><strong>${(mins/60).toFixed(1)} <small>小时</small></strong><small>${actualLogs.length} 次投入 ↗</small></a><a class="stat" href="#tasks"><span class="stat-label">待完成任务</span><strong>${pending.length} <small>项</small></strong><small>${pending.filter(t=>t.date<today()).length} 项逾期 ↗</small></a><a class="stat" href="#subjects"><span class="stat-label">我的学科</span><strong>${data.subjects.length} <small>/ 6</small></strong><small>${data.subjects.filter(s=>s.level==='HL').length} HL · ${data.subjects.filter(s=>s.level==='SL').length} SL ↗</small></a><a class="stat" href="#settings"><span class="stat-label">目标考试倒计时</span><strong>${days} <small>天</small></strong><small>${esc(data.profile.exam)} · 修改 ↗</small></a></div>
   <div class="grid"><section class="panel"><div class="panel-head"><h2>接下来要做的事</h2><a class="text-button" href="#tasks">全部任务 ↗</a></div>${taskRows(pending.slice(0,4))}</section><section class="panel"><div class="panel-head"><h2>到期复习</h2><span class="tag">${reviews.length} 个知识点</span></div>${reviews.slice(0,4).map(t=>`<a class="review-link" href="#subject/${t.subject}"><span class="review-icon">↻</span><div><strong>${esc(t.title)}</strong><small>${esc(subjectName(t.subject))} · ${esc(t.review)}</small></div><span>↗</span></a>`).join('')||empty('让记忆，慢慢扎根','在科目知识点里设置复习日期，这里会提醒你。')}<a class="text-button" href="#review">进入复习中心 →</a></section></div>
   <div class="section-title"><h2>我的学科 <span class="sub"> / MY SUBJECTS</span></h2><a class="text-button" href="#subjects">管理学科 ↗</a></div><div class="subjects">${subjectCards()||`<button class="add-subject-card" data-add="subjects"><span>＋</span><strong>添加你的第一门课</strong><small>建立专属的 HL / SL 学科空间</small></button>`}</div>
   ${studyDashboard()}<section class="panel"><div class="panel-head"><h2>最近 7 天的积累</h2><span class="sub">${weekMinutes} 分钟</span></div>${weekChart()}</section>`;

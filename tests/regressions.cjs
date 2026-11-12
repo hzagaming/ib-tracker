@@ -273,8 +273,8 @@ test('exam planning creates three dated tasks once and exposes exam in calendar'
   assert.equal(a.run('data.exams.length'),1);assert.ok(a.$('.exam-card').textContent.includes('Physics mock'));
   a.$('[data-exam-tasks]').click();a.submit({});assert.equal(a.run('data.tasks.length'),3);assert.equal(a.run('data.tasks[0].date'),a.run('today()'));
   a.run('createExamTasks(data.exams[0].id)');a.submit({});assert.equal(a.run('data.tasks.length'),3);
-  a.route('#calendar');a.run("calendarMonth=new Date(data.exams[0].date+'T12:00:00');render()");assert.ok(a.$('[data-edit^="exams:"]'));
-  a.$('[data-edit^="exams:"]').click();assert.equal(a.$('#f-title').value,'Physics mock');
+  a.route('#calendar');a.run("calendarMonth=new Date(data.exams[0].date+'T12:00:00');render()");a.$('[data-calendar-day="'+a.run('data.exams[0].date')+'"]').click();assert.ok(a.$('[data-calendar-edit^="exams:"]'));
+  a.$('[data-calendar-edit^="exams:"]').click();assert.equal(a.$('#f-title').value,'Physics mock');
 });
 
 test('past and completed exams do not generate new revision tasks',()=>{
@@ -401,4 +401,108 @@ test('weekly planner actual time excludes future-dated learning logs',()=>{
 test('a cross-tab refresh removes stale undo actions before they can alter newer data',()=>{
   const memory=new Map(),a=workspace(memory);a.task('First');a.route('#tasks');a.$('#enable-task-bulk').click();a.$('#select-visible-tasks').click();a.$('#complete-selected-tasks').click();assert.ok(a.$('#toast-action'));
   const b=workspace(memory);b.task('Newer work');a.events.storage({key:KEY});assert.equal(a.$('#toast-action'),null);assert.equal(a.run('data.tasks.length'),2);assert.equal(a.run('data.tasks.find(t=>t.title==="First").done'),true);
+});
+
+function scheduleFixture(a){
+  a.clock.now=new Date(2026,10,12,12).getTime();
+  const subject=a.subject();
+  a.run(`data.tasks.push({id:'schedule-task',title:'Review waves',subject:${JSON.stringify(subject)},date:'2026-11-12',priority:'普通',type:'复习',notes:'',done:false});
+    data.plans.push({id:'schedule-plan',title:'Wave questions',subject:${JSON.stringify(subject)},date:'2026-11-12',time:'15:30',minutes:40,notes:'',done:false});
+    data.exams.push({id:'schedule-exam',title:'Wave quiz',subject:${JSON.stringify(subject)},date:'2026-11-12',time:'09:00',duration:60,target:'6',scope:'Waves',notes:'',status:'计划中'});
+    data.core.push({id:'schedule-core',title:'EE outline',subject:'',date:'2026-11-10',type:'EE',stage:'已完成',notes:''});
+    save();calendarMonth=new Date(2026,10,1);location.hash='#calendar';render()`);
+  return subject;
+}
+
+test('calendar combines four record types and exposes the selected day without editing data',()=>{
+  const a=workspace();scheduleFixture(a);const raw=a.memory.get(KEY);
+  assert.equal(a.document.querySelectorAll('[data-calendar-day]').length,30);
+  assert.ok(a.$('.calendar-summary').textContent.includes('4 项安排'));
+  assert.equal(a.$('[data-calendar-day="2026-11-12"]').getAttribute('aria-current'),'date');
+  assert.equal(a.document.querySelectorAll('.calendar-day-detail .agenda-row').length,3);
+  assert.ok(a.$('.calendar-day-detail').textContent.includes('15:30 · 40 分钟'));
+  a.$('[data-calendar-day="2026-11-10"]').click();assert.ok(a.$('.calendar-day-detail .completed').textContent.includes('EE outline'));
+  assert.equal(a.memory.get(KEY),raw);
+});
+
+test('calendar filters apply consistently to grid, counts and agenda with a reset action',()=>{
+  const a=workspace();const subject=scheduleFixture(a);
+  a.$('#calendar-subject').value=subject;a.$('#calendar-subject').onchange({target:a.$('#calendar-subject')});
+  assert.ok(a.$('.calendar-summary').textContent.includes('3 项安排'));
+  a.$('#calendar-kind').value='plans';a.$('#calendar-kind').onchange({target:a.$('#calendar-kind')});
+  a.$('[data-calendar-mode="agenda"]').click();assert.equal(a.document.querySelectorAll('.agenda-row').length,1);assert.ok(a.$('.agenda-title').textContent.includes('Wave questions'));
+  a.$('#calendar-clear').click();assert.equal(a.document.querySelectorAll('.agenda-row').length,4);
+  a.$('#calendar-subject').value='general:';a.$('#calendar-subject').onchange({target:a.$('#calendar-subject')});assert.equal(a.document.querySelectorAll('.agenda-row').length,1);
+  a.$('#calendar-status').value='pending';a.$('#calendar-status').onchange({target:a.$('#calendar-status')});assert.equal(a.document.querySelectorAll('.agenda-row').length,0);
+  assert.ok(a.$('.calendar-agenda').textContent.includes('还没有匹配'));
+});
+
+test('calendar supports leap years, year boundaries and returning to today',()=>{
+  const a=workspace();a.clock.now=new Date(2026,10,12,12).getTime();
+  a.run("calendarMonth=new Date(2024,1,1);location.hash='#calendar';render()");assert.equal(a.document.querySelectorAll('[data-calendar-day]').length,29);
+  a.run('calendarMonth=new Date(2026,11,1);render()');a.$('#month-next').click();assert.equal(a.run('calendarDay'),'2027-01-01');
+  a.$('#month-prev').click();assert.equal(a.run('calendarDay'),'2026-12-01');
+  a.$('#month-today').click();assert.equal(a.run('calendarDay'),'2026-11-12');assert.equal(a.$('[data-calendar-day="2026-11-12"]').getAttribute('aria-pressed'),'true');
+});
+
+test('date-based calendar creation prefills every record type and the selected subject',()=>{
+  const a=workspace(),subject=scheduleFixture(a);
+  a.$('#calendar-subject').value=subject;a.$('#calendar-subject').onchange({target:a.$('#calendar-subject')});a.$('[data-calendar-day="2026-11-23"]').click();
+  for(const kind of ['tasks','plans','exams','core']){
+    a.$('[data-calendar-add="'+kind+'"]').click();assert.equal(a.$('#f-date').value,'2026-11-23');assert.equal(a.$('#f-subject').value,subject);
+    a.submit({title:'New '+kind});assert.equal(a.run(`data.${kind}.at(-1).date`),'2026-11-23');assert.equal(a.run(`data.${kind}.at(-1).subject`),subject);
+  }
+  assert.equal(a.document.querySelectorAll('.calendar-day-detail .agenda-row').length,4);a.run('validate(data)');
+});
+
+test('agenda date input rejects blank and impossible dates without opening an editor',()=>{
+  const a=workspace();scheduleFixture(a);a.$('[data-calendar-mode="agenda"]').click();
+  a.$('#calendar-create-date').value='';a.$('[data-calendar-add="tasks"]').click();assert.equal(a.$('#modal').open,false);
+  a.$('#calendar-create-date').value='2026-02-30';a.$('[data-calendar-add="plans"]').click();assert.equal(a.$('#modal').open,false);
+  a.$('#calendar-create-date').value='2026-12-03';a.$('[data-calendar-add="exams"]').click();assert.equal(a.$('#f-date').value,'2026-12-03');
+});
+
+test('calendar plan completion saves one actual log and respects storage rollback',()=>{
+  const a=workspace();scheduleFixture(a);a.$('[data-plan-complete="schedule-plan"]').click();a.fault.data=true;a.submit({minutes:23});
+  assert.equal(a.$('#modal').open,true);assert.equal(a.run('data.logs.length'),0);assert.equal(a.run('data.plans[0].done'),false);
+  a.fault.data=false;a.submit({minutes:23});assert.equal(a.run('data.logs.length'),1);assert.equal(a.run('data.logs[0].minutes'),23);assert.equal(a.run('data.plans[0].done'),true);
+  assert.equal(a.$('[data-plan-complete="schedule-plan"]'),null);assert.ok(a.$('.calendar-summary').textContent.includes('2 项待完成'));
+  a.run('completePlan("schedule-plan")');assert.equal(a.run('data.logs.length'),1);
+});
+
+test('calendar editing and agenda day links open the original records',()=>{
+  const a=workspace();scheduleFixture(a);a.$('[data-calendar-mode="agenda"]').click();a.$('[data-calendar-open-day="2026-11-10"]').click();
+  assert.equal(a.run('calendarMode'),'month');assert.equal(a.run('calendarDay'),'2026-11-10');a.$('[data-calendar-edit="core:schedule-core"]').click();
+  assert.equal(a.$('#f-stage').value,'已完成');a.submit({title:'Revised outline'});assert.equal(a.run('data.core.length'),1);assert.equal(a.run('data.core[0].title'),'Revised outline');
+  a.$('[data-calendar-day="2026-11-12"]').click();a.$('[data-calendar-edit="plans:schedule-plan"]').click();assert.equal(a.$('#f-time').value,'15:30');a.$('#cancel').click();
+  a.$('[data-calendar-edit="exams:schedule-exam"]').click();assert.equal(a.$('#f-scope').value,'Waves');a.$('#cancel').click();
+  a.$('[data-calendar-edit="tasks:schedule-task"]').click();assert.equal(a.$('#f-title').value,'Review waves');
+});
+
+test('removed subjects cannot leave a stale calendar filter hiding all records',()=>{
+  const a=workspace(),subject=scheduleFixture(a);a.run(`calendarSubject=${JSON.stringify(subject)};deleteRecord('subjects',${JSON.stringify(subject)})`);
+  assert.equal(a.run('calendarSubject'),'');assert.equal(a.$('#calendar-subject').value,'');assert.ok(a.$('.calendar-summary').textContent.includes('4 项安排'));
+});
+
+test('dashboard includes scheduled mastered reviews when they become due',()=>{
+  const a=workspace(),subject=a.subject();a.run(`topicEditor(${JSON.stringify(subject)})`);a.submit({title:'Revisit conservation',review:a.run('today()')});
+  a.run("rateReview(data.topics[0].id,'good')");a.clock.now+=7*86400000;a.route('#dashboard');
+  assert.equal(a.run('data.topics[0].status'),'mastered');assert.ok(a.$('.review-link').textContent.includes('Revisit conservation'));
+  assert.ok(a.$('a[href="#review"] .nav-count').textContent.includes('1'));
+});
+
+test('dashboard and subject actual learning totals exclude future logs',()=>{
+  const a=workspace(),subject=a.subject();a.run(`data.logs.push({id:'actual',title:'Actual study',subject:${JSON.stringify(subject)},date:today(),minutes:60,notes:''},{id:'future',title:'Future draft',subject:${JSON.stringify(subject)},date:dateAfter(1),minutes:600,notes:''});save()`);
+  a.route('#dashboard');const total=a.$('a.stat[href="#logs"]');assert.ok(total.textContent.includes('1.0'));assert.ok(total.textContent.includes('1 次投入'));
+  a.route('#subject/'+subject);assert.ok(a.document.querySelectorAll('.stat')[2].textContent.includes('1.0'));assert.equal(a.$('[data-edit="logs:future"]'),null);
+});
+
+test('calendar keyboard navigation crosses months and clamps page navigation to valid dates',()=>{
+  const a=workspace();scheduleFixture(a);
+  const press=(date,key)=>{let prevented=false;a.$('[data-calendar-day="'+date+'"]').onkeydown({key,preventDefault(){prevented=true}});assert.equal(prevented,true)};
+  a.run("selectCalendarDay('2026-12-31')");press('2026-12-31','ArrowRight');assert.equal(a.run('calendarDay'),'2027-01-01');
+  press('2027-01-01','ArrowUp');assert.equal(a.run('calendarDay'),'2026-12-25');
+  a.run("selectCalendarDay('2024-03-31')");press('2024-03-31','PageUp');assert.equal(a.run('calendarDay'),'2024-02-29');
+  press('2024-02-29','Home');assert.equal(a.run('calendarDay'),'2024-02-26');press('2024-02-26','End');assert.equal(a.run('calendarDay'),'2024-03-03');
+  const days=[...a.document.querySelectorAll('[data-calendar-day]')];assert.equal(days.filter(el=>el.getAttribute('tabindex')==='0').length,1);assert.equal(a.$('[data-calendar-day="2024-03-03"]').getAttribute('tabindex'),'0');
 });

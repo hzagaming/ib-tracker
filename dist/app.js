@@ -74,6 +74,7 @@ function closeMainMenu(){
   for(const id of ['menu-toggle','dock-more'])$('#'+id)?.setAttribute('aria-expanded','false');
 }
 function bindExperience(){
+  bindCalendar();
   document.querySelectorAll('aside #nav a,.mobile-dock a').forEach(el=>el.onclick=closeMainMenu);
   const more=$('#dock-more'),primary=['dashboard','tasks','subjects','subject','focus'];
   if(more){more.setAttribute('aria-controls','nav');more.setAttribute('aria-expanded',String(document.body?.classList.contains('menu-open')??false));if(!primary.includes(page))more.classList.add('active')}
@@ -83,6 +84,86 @@ function bindExperience(){
   if($('.skip-link'))$('.skip-link').onclick=e=>{e.preventDefault();$('#app')?.focus?.({preventScroll:true});$('#app')?.scrollIntoView?.({block:'start'})};
   if($('#task-sort')){$('#task-sort').value=taskSort;$('#task-sort').onchange=e=>{taskSort=e.target.value;renderList()}};
   bindTaskTools();
+}
+
+let calendarMode='month',calendarSubject='',calendarKind='',calendarStatus='all',calendarDay='';
+const CALENDAR_KINDS=[['tasks','任务'],['plans','学习计划'],['exams','考试'],['core','核心项目']];
+function calendarEntries(){
+  if(calendarSubject&&calendarSubject!=='general:'&&!data.subjects.some(s=>s.id===calendarSubject))calendarSubject='';
+  return CALENDAR_KINDS.flatMap(([kind,label])=>data[kind].map(record=>({
+    ...record,kind,label,done:kind==='core'?record.stage==='已完成':kind==='exams'?record.status==='已完成':record.done
+  }))).filter(x=>(!calendarSubject||x.subject===(calendarSubject==='general:'?'':calendarSubject))&&(!calendarKind||x.kind===calendarKind)&&(calendarStatus!=='pending'||!x.done))
+    .sort((a,b)=>a.date.localeCompare(b.date)||Number(a.done)-Number(b.done)||(a.time||'').localeCompare(b.time||'')||a.title.localeCompare(b.title,'zh-CN'));
+}
+function calendarDateLabel(date){
+  const [y,m,d]=date.split('-').map(Number);
+  return `${m} 月 ${d} 日 · 周${'日一二三四五六'[new Date(y,m-1,d,12).getDay()]}${date===today()?' · 今天':''}`;
+}
+function calendarRows(items){
+  return items.map(x=>`<article class="agenda-row ${x.done?'completed':''}"><div class="agenda-body"><span class="tag">${esc(x.label)}</span><button class="agenda-title" data-calendar-edit="${x.kind}:${x.id}">${esc(x.title)}</button><small>${esc(subjectName(x.subject))}${x.time?' · '+esc(x.time):''}${x.kind==='plans'?' · '+x.minutes+' 分钟':''} · ${x.done?'已完成':x.date<today()?'已逾期':'待完成'}</small></div>${!x.done&&x.kind==='plans'?`<button class="outline" data-plan-complete="${x.id}">完成并记录</button>`:''}</article>`).join('');
+}
+function calendarAddButtons(date){
+  return `<div class="calendar-add-actions">${CALENDAR_KINDS.map(([kind,label])=>`<button class="outline" data-calendar-add="${kind}" data-calendar-date="${date}">＋ ${label}</button>`).join('')}</div>`;
+}
+function buildCalendarView(){
+  const year=calendarMonth.getFullYear(),month=calendarMonth.getMonth(),prefix=`${year}-${String(month+1).padStart(2,'0')}`;
+  if(!validDate(calendarDay)||!calendarDay.startsWith(prefix+'-'))calendarDay=today().startsWith(prefix+'-')?today():prefix+'-01';
+  const entries=calendarEntries(),items=entries.filter(x=>x.date.startsWith(prefix+'-')),byDate=new Map();
+  for(const x of items){if(!byDate.has(x.date))byDate.set(x.date,[]);byDate.get(x.date).push(x)}
+  const offset=(new Date(year,month,1).getDay()+6)%7,count=new Date(year,month+1,0).getDate();
+  const cells=Array.from({length:Math.ceil((offset+count)/7)*7},(_,i)=>{
+    const day=i-offset+1;
+    if(day<1||day>count)return '<div class="calendar-cell inactive" aria-hidden="true"></div>';
+    const date=prefix+'-'+String(day).padStart(2,'0'),list=byDate.get(date)||[],pending=list.filter(x=>!x.done).length;
+    return `<button class="calendar-cell calendar-date ${date===today()?'is-today':''} ${date===calendarDay?'is-selected':''}" data-calendar-day="${date}" aria-pressed="${date===calendarDay}" ${date===today()?'aria-current="date"':''} aria-label="${date}，${list.length} 项安排，${pending} 项待完成"><span class="date-number">${day}</span><span class="calendar-previews">${list.slice(0,2).map(x=>`<span class="calendar-item ${x.done?'completed':''}">${esc(x.label)} · ${esc(x.title)}</span>`).join('')}</span>${list.length?`<span class="calendar-count">${list.length} 项${pending?' · 待办 '+pending:''}</span>`:''}</button>`;
+  }).join('');
+  const selected=byDate.get(calendarDay)||[],pending=items.filter(x=>!x.done).length;
+  const overdue=items.filter(x=>!x.done&&x.date<today()).length;
+  return head('学习日程','任务、学习计划、考试和核心项目，在同一张日程中安排。')+
+    `<div class="filters calendar-filters"><select id="calendar-subject" aria-label="筛选日程科目"><option value="">全部科目</option><option value="general:">综合 / 核心</option>${data.subjects.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><select id="calendar-kind" aria-label="筛选日程类型"><option value="">全部类型</option>${CALENDAR_KINDS.map(([kind,label])=>`<option value="${kind}">${label}</option>`).join('')}</select><select id="calendar-status" aria-label="筛选日程状态"><option value="all">全部状态</option><option value="pending">只看待完成</option></select>${calendarSubject||calendarKind||calendarStatus!=='all'?'<button class="text-button" id="calendar-clear">清除筛选</button>':''}</div>
+    <section class="panel schedule-panel"><div class="panel-head calendar-heading"><div class="toolbar"><button id="month-prev" aria-label="上个月">←</button><h2>${year} 年 ${month+1} 月</h2><button id="month-next" aria-label="下个月">→</button><button class="outline" id="month-today">今天</button></div><div class="task-tabs calendar-view-switch" role="group" aria-label="日程视图">${[['month','月历'],['agenda','日程清单']].map(([mode,label])=>`<button data-calendar-mode="${mode}" class="${calendarMode===mode?'selected':''}" aria-pressed="${calendarMode===mode}">${label}</button>`).join('')}</div></div><p class="sub calendar-summary" role="status">所选月 · ${items.length} 项安排 · ${pending} 项待完成 · ${overdue} 项逾期${calendarSubject||calendarKind||calendarStatus!=='all'?' · 已筛选':''}</p>
+    ${calendarMode==='month'?`<p class="sub calendar-help">选择日期查看当天安排；方向键切换日期，Page Up / Down 切换月份。</p><div class="calendar schedule-grid" role="group" aria-label="选择日程日期">${['一','二','三','四','五','六','日'].map(d=>`<div class="calendar-day">周${d}</div>`).join('')}${cells}</div><section class="calendar-day-detail" aria-labelledby="calendar-day-title"><div class="panel-head"><h3 id="calendar-day-title">${calendarDateLabel(calendarDay)}</h3><span class="tag">${selected.length} 项安排</span></div>${calendarAddButtons(calendarDay)}${selected.length?calendarRows(selected):empty('这一天还没有匹配的安排','可以为这一天添加任务、学习计划、考试或项目。')}</section>`:
+      `<div class="calendar-agenda">${items.length?[...byDate].map(([date,list])=>`<section class="agenda-day"><div class="panel-head"><h3>${calendarDateLabel(date)}</h3><button class="text-button" data-calendar-open-day="${date}">查看当天 ↗</button></div>${calendarRows(list)}</section>`).join(''):empty('这个月还没有匹配的安排','调整筛选条件，或选一个日期添加下一步。')}</div><div class="agenda-create"><label for="calendar-create-date">添加到日期</label><input type="date" id="calendar-create-date" value="${calendarDay}" required>${calendarAddButtons(calendarDay)}</div>`}
+    </section>`;
+}
+function calendarCreate(kind,date){
+  if(!CALENDAR_KINDS.some(([key])=>key===kind)||!validDate(date)){toast('请先选择有效的日程日期。');return}
+  const subject=calendarSubject==='general:'?'':calendarSubject;
+  if(kind==='plans')studyEditor('plan',null,{date,subject});
+  else if(kind==='exams'){examEditor(null,subject);$('#f-date').value=date}
+  else{add(kind);$('#f-date').value=date;$('#f-subject').value=subject}
+}
+function selectCalendarDay(date){
+  if(!validDate(date))return;
+  const [year,month]=date.split('-').map(Number);
+  calendarDay=date;calendarMonth=new Date(year,month-1,1);calendarMode='month';render();
+  document.querySelector(`[data-calendar-day="${date}"]`)?.focus?.({preventScroll:true});
+}
+function calendarDayKey(event,date){
+  if(event.altKey||event.ctrlKey||event.metaKey)return;
+  const [year,month,day]=date.split('-').map(Number),weekday=(new Date(year,month-1,day,12).getDay()+6)%7;
+  const delta={ArrowLeft:-1,ArrowRight:1,ArrowUp:-7,ArrowDown:7,Home:-weekday,End:6-weekday}[event.key];
+  let next;
+  if(delta!==undefined)next=dateAfter(delta,date);
+  else if(event.key==='PageUp'||event.key==='PageDown'){
+    const first=new Date(year,month-1+(event.key==='PageUp'?-1:1),1,12);
+    next=localDate(new Date(first.getFullYear(),first.getMonth(),Math.min(day,new Date(first.getFullYear(),first.getMonth()+1,0).getDate()),12));
+  }else return;
+  event.preventDefault();selectCalendarDay(next);
+}
+function bindCalendar(){
+  if(page!=='calendar')return;
+  for(const [id,value,set] of [['calendar-subject',calendarSubject,v=>calendarSubject=v],['calendar-kind',calendarKind,v=>calendarKind=v],['calendar-status',calendarStatus,v=>calendarStatus=v]]){
+    $('#'+id).value=value;$('#'+id).onchange=e=>{set(e.target.value);render()};
+  }
+  if($('#calendar-clear'))$('#calendar-clear').onclick=()=>{calendarSubject='';calendarKind='';calendarStatus='all';render()};
+  for(const [id,delta] of [['month-prev',-1],['month-next',1]])$('#'+id).onclick=()=>{calendarMonth=new Date(calendarMonth.getFullYear(),calendarMonth.getMonth()+delta,1);calendarDay='';render()};
+  $('#month-today').onclick=()=>{const now=new Date();calendarMonth=new Date(now.getFullYear(),now.getMonth(),1);calendarDay=today();render()};
+  document.querySelectorAll('[data-calendar-mode]').forEach(el=>el.onclick=()=>{calendarMode=el.dataset.calendarMode;render()});
+  document.querySelectorAll('[data-calendar-day],[data-calendar-open-day]').forEach(el=>el.onclick=()=>selectCalendarDay(el.dataset.calendarDay||el.dataset.calendarOpenDay));
+  document.querySelectorAll('[data-calendar-day]').forEach(el=>{el.tabIndex=el.dataset.calendarDay===calendarDay?0:-1;el.onkeydown=e=>calendarDayKey(e,el.dataset.calendarDay)});
+  document.querySelectorAll('[data-calendar-edit]').forEach(el=>el.onclick=()=>{const[kind,id]=el.dataset.calendarEdit.split(':');if(kind==='plans')studyEditor('plan',id);else if(kind==='exams')examEditor(id);else add(kind,id)});
+  document.querySelectorAll('[data-calendar-add]').forEach(el=>el.onclick=()=>calendarCreate(el.dataset.calendarAdd,$('#calendar-create-date')?.value??el.dataset.calendarDate));
 }
 
 'use strict';
@@ -510,7 +591,7 @@ try {
 let page='dashboard',filter='',status='all',subjectFilter='',priorityFilter='',selectedSubject='';
 let undoSnapshot=null,focusDraft=false,profileDirty=false,revertingProfileNavigation=false;
 let calendarMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);
-const nav=[['dashboard','◫','学习总览'],['subjects','▦','我的学科'],['tasks','✓','任务与计划'],['planner','▥','每周学习计划'],['exams','▣','考试冲刺'],['reflections','✧','每周复盘'],['review','↻','复习中心'],['library','▧','学习资料库'],['mistakes','✎','错题本'],['analytics','◴','学习分析'],['search','⌕','搜索记录'],['calendar','▦','截止日期月历'],['logs','▤','学习日志'],['grades','↗','成绩追踪'],['core','◇','核心项目'],['focus','◷','专注时光'],['settings','⚙','个人设置']];
+const nav=[['dashboard','◫','学习总览'],['subjects','▦','我的学科'],['tasks','✓','任务与计划'],['planner','▥','每周学习计划'],['exams','▣','考试冲刺'],['reflections','✧','每周复盘'],['review','↻','复习中心'],['library','▧','学习资料库'],['mistakes','✎','错题本'],['analytics','◴','学习分析'],['search','⌕','搜索记录'],['calendar','▦','学习日程'],['logs','▤','学习日志'],['grades','↗','成绩追踪'],['core','◇','核心项目'],['focus','◷','专注时光'],['settings','⚙','个人设置']];
 const groups=[['语言与文学','Chinese A: Literature','Chinese A: Language and Literature','English A: Literature','English A: Language and Literature','Language A: Literature（自选语言）','Language A: Language and Literature（自选语言）','Literature and Performance'],['语言习得','English B','Chinese B','French B','Spanish B','French ab initio','Spanish ab initio','Language B（自选语言）','Language ab initio（自选语言）','Latin','Classical Greek'],['个体与社会','Economics','Business Management','History','Geography','Psychology','Global Politics','Digital Society','Philosophy','Social and Cultural Anthropology','World Religions'],['科学','Biology','Chemistry','Physics','Computer Science','Design Technology','Sports, Exercise and Health Science','Environmental Systems and Societies'],['数学','Mathematics: Analysis and Approaches','Mathematics: Applications and Interpretation'],['艺术','Visual Arts','Music','Theatre','Film','Dance']];
 function save({recover=false}={}) {
   if(recoveryRaw!==null&&!recover){toast('原有数据无法读取，请先导出恢复文件或导入有效备份。');return false}
@@ -701,7 +782,7 @@ function subjectDetail() {
   const s = data.subjects.find(s => s.id === selectedSubject);
   if (!s) return head('没有找到这门科目', '<a href="#subjects">返回我的学科 ↗</a>');
   const topics = data.topics.filter(t => t.subject === s.id);
-  const logs = data.logs.filter(l => l.subject === s.id);
+  const logs = data.logs.filter(l => l.subject === s.id && l.date <= today());
   const grades = data.grades.filter(g => g.subject === s.id).reverse().sort((a,b)=>b.date.localeCompare(a.date));
   const tasks = data.tasks.filter(t => t.subject === s.id && !t.done).sort((a,b)=>a.date.localeCompare(b.date));
   return head(esc(s.name), `${s.level} · ${groups[s.group][0]} · 目标 ${s.target} / 7`) +
@@ -712,20 +793,8 @@ function subjectDetail() {
     <div class="grid" style="margin-top:22px"><section class="panel"><div class="panel-head"><h2>待办任务</h2><button class="text-button" id="subject-task">＋ 添加</button></div>${taskRows(tasks)}</section><section class="panel"><h2>学科笔记</h2><div class="note">${esc(s.notes) || '点击「编辑学科与笔记」写下你的复习重点。'}</div></section></div>
     <div class="grid"><section class="panel"><h2>最近学习</h2>${logs.slice().reverse().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5).map(x=>recordRow(x,'logs')).join('') || empty('还没有学习记录','学习后，留下一点收获。')}</section><section class="panel"><h2>成绩与反馈</h2>${grades.slice(0,5).map(x=>recordRow(x,'grades')).join('') || empty('还没有测评记录','记录真实成绩与改进方向。')}</section></div>`;
 }
-function calendarView() {
-  const year=calendarMonth.getFullYear(), month=calendarMonth.getMonth();
-  const first=new Date(year,month,1), offset=(first.getDay()+6)%7;
-  const count=new Date(year,month+1,0).getDate();
-  const cells=Array.from({length:Math.ceil((offset+count)/7)*7},(_,i)=>{
-    const day=i-offset+1;
-    if(day<1||day>count)return '<div class="calendar-cell inactive" aria-hidden="true"></div>';
-    const date=`${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-    const items=[...data.tasks.filter(t=>t.date===date).map(t=>({...t,kind:'tasks',label:t.type})),...data.core.filter(t=>t.date===date).map(t=>({...t,kind:'core',label:t.type})),...data.exams.filter(t=>t.date===date).map(t=>({...t,kind:'exams',label:'考试',done:t.status==='已完成'}))];
-    return `<div class="calendar-cell ${date===today()?'is-today':''}"><span class="date-number">${day}</span>${items.map(t=>`<button class="calendar-item ${t.done||t.stage==='已完成'?'completed':''}" data-edit="${t.kind}:${t.id}" title="${esc(t.title)}">${esc(t.label)} · ${esc(t.title)}</button>`).join('')}${!items.length?'<span class="calendar-free">—</span>':''}</div>`;
-  });
-  return head('截止日期月历','把作业、考试和核心项目的时间放在一起。','添加任务','tasks')+
-    `<div class="panel"><div class="panel-head"><div class="toolbar"><button id="month-prev" aria-label="上个月">←</button><h2>${year} 年 ${month+1} 月</h2><button id="month-next" aria-label="下个月">→</button></div><button class="outline" id="month-today">本月</button></div><div class="calendar-scroll"><div class="calendar">${['一','二','三','四','五','六','日'].map(d=>`<div class="calendar-day">周${d}</div>`).join('')}${cells.join('')}</div></div><p class="sub">点击日程可编辑。已完成记录以浅色显示。</p></div>`;
-}
+function calendarView() {return buildCalendarView()}
+
 function gradeSummary() {
   if (!data.subjects.length) return '';
   return `<div class="panel" style="margin-bottom:20px"><h2>各科学习表现</h2>${data.subjects.map(s=>{
@@ -742,8 +811,6 @@ function bindEnhancements() {
   document.querySelectorAll('[data-topic]').forEach(el=>el.onclick=e=>{e.preventDefault();topicEditor(selectedSubject,el.dataset.topic)});
   document.querySelectorAll('[data-topic-status]').forEach(el=>el.onchange=()=>{mutate(()=>{const t=data.topics.find(t=>t.id===el.dataset.topicStatus);t.status=el.value;if(el.value==='mastered')t.reviewActive=false});render()});
   if($('#subject-task'))$('#subject-task').onclick=()=>{add('tasks');$('#f-subject').value=selectedSubject};
-  for(const [id,delta] of [['month-prev',-1],['month-next',1]])if($('#'+id))$('#'+id).onclick=()=>{calendarMonth=new Date(calendarMonth.getFullYear(),calendarMonth.getMonth()+delta,1);render()};
-  if($('#month-today'))$('#month-today').onclick=()=>{calendarMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);render()};
   for(const [id,value,update] of [['subject-filter',subjectFilter,v=>subjectFilter=v],['priority-filter',priorityFilter,v=>priorityFilter=v]])if($('#'+id)){$('#'+id).value=value;$('#'+id).onchange=e=>{update(e.target.value);renderList()}};
 }
 
@@ -765,8 +832,9 @@ function taskTabs() {
 function dashboardView() {
   const pending=data.tasks.filter(t=>!t.done).sort((a,b)=>a.date.localeCompare(b.date));
   const due=pending.filter(t=>t.date<=today());
-  const reviews=data.topics.filter(t=>t.status!=='mastered'&&t.review&&t.review<=today()).sort((a,b)=>a.review.localeCompare(b.review));
-  const mins=data.logs.reduce((n,l)=>n+l.minutes,0);
+  const reviews=data.topics.filter(t=>scheduledReview(t)&&t.review<=today()).sort((a,b)=>a.review.localeCompare(b.review));
+  const actualLogs=data.logs.filter(l=>l.date<=today());
+  const mins=actualLogs.reduce((n,l)=>n+l.minutes,0);
   const weekStart=new Date();weekStart.setDate(weekStart.getDate()-6);
   const weekMinutes=data.logs.filter(l=>l.date>=localDate(weekStart)&&l.date<=today()).reduce((n,l)=>n+l.minutes,0);
   const days=daysUntil(data.profile.exam);
@@ -775,7 +843,7 @@ function dashboardView() {
   return head(`${name}今天，向前一步。`,new Date().toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'})+' · 你的学习，由你掌握。','记录学习','logs')+
   `<section class="today-hero"><div class="hero-copy"><span class="eyebrow">YOUR DAILY COMPASS</span><h2>${due.length?'先做好今天重要的事。':reviews.length?'给学过的知识，再一次相遇。':'留一点时间，给自己的进步。'}</h2><p>${due.length?`有 ${due.length} 项任务需要关注，${reviews.length} 个知识点等待复习。`:reviews.length?`有 ${reviews.length} 个知识点已到复习日期，温故也在前进。`:'你的日程还有空间。安排一个小目标，或开启一段专注。'}</p><div class="hero-actions"><a class="primary button-link" href="${due.length?'#tasks':'#focus'}">${due.length?'查看待办任务':'开始 25 分钟专注'} ↗</a><button class="hero-secondary" data-add="tasks">＋ 安排任务</button></div></div><div class="hero-summary"><span class="hero-mark">✳︎</span><span class="eyebrow">LAST 7 DAYS</span><strong>${(weekMinutes/60).toFixed(1)}<small>小时</small></strong><span>每一份投入，都算数。</span></div></section>
   ${progressDashboard()}${onboarding?`<section class="getting-started"><div><span class="eyebrow">MAKE IT YOURS</span><h3>三小步，建立你的学习空间</h3></div><div class="setup-steps"><button data-add="subjects" class="${data.subjects.length?'step-done':''}"><span>${data.subjects.length?'✓':'1'}</span>添加你的学科</button><button data-add="tasks" class="${data.tasks.length?'step-done':''}"><span>${data.tasks.length?'✓':'2'}</span>安排第一项任务</button><button data-add="logs" class="${data.logs.length?'step-done':''}"><span>${data.logs.length?'✓':'3'}</span>记录一次学习</button></div></section>`:''}
-  <div class="stats"><a class="stat" href="#logs"><span class="stat-label">累计学习</span><strong>${(mins/60).toFixed(1)} <small>小时</small></strong><small>${data.logs.length} 次投入 ↗</small></a><a class="stat" href="#tasks"><span class="stat-label">待完成任务</span><strong>${pending.length} <small>项</small></strong><small>${pending.filter(t=>t.date<today()).length} 项逾期 ↗</small></a><a class="stat" href="#subjects"><span class="stat-label">我的学科</span><strong>${data.subjects.length} <small>/ 6</small></strong><small>${data.subjects.filter(s=>s.level==='HL').length} HL · ${data.subjects.filter(s=>s.level==='SL').length} SL ↗</small></a><a class="stat" href="#settings"><span class="stat-label">目标考试倒计时</span><strong>${days} <small>天</small></strong><small>${esc(data.profile.exam)} · 修改 ↗</small></a></div>
+  <div class="stats"><a class="stat" href="#logs"><span class="stat-label">累计学习</span><strong>${(mins/60).toFixed(1)} <small>小时</small></strong><small>${actualLogs.length} 次投入 ↗</small></a><a class="stat" href="#tasks"><span class="stat-label">待完成任务</span><strong>${pending.length} <small>项</small></strong><small>${pending.filter(t=>t.date<today()).length} 项逾期 ↗</small></a><a class="stat" href="#subjects"><span class="stat-label">我的学科</span><strong>${data.subjects.length} <small>/ 6</small></strong><small>${data.subjects.filter(s=>s.level==='HL').length} HL · ${data.subjects.filter(s=>s.level==='SL').length} SL ↗</small></a><a class="stat" href="#settings"><span class="stat-label">目标考试倒计时</span><strong>${days} <small>天</small></strong><small>${esc(data.profile.exam)} · 修改 ↗</small></a></div>
   <div class="grid"><section class="panel"><div class="panel-head"><h2>接下来要做的事</h2><a class="text-button" href="#tasks">全部任务 ↗</a></div>${taskRows(pending.slice(0,4))}</section><section class="panel"><div class="panel-head"><h2>到期复习</h2><span class="tag">${reviews.length} 个知识点</span></div>${reviews.slice(0,4).map(t=>`<a class="review-link" href="#subject/${t.subject}"><span class="review-icon">↻</span><div><strong>${esc(t.title)}</strong><small>${esc(subjectName(t.subject))} · ${esc(t.review)}</small></div><span>↗</span></a>`).join('')||empty('让记忆，慢慢扎根','在科目知识点里设置复习日期，这里会提醒你。')}<a class="text-button" href="#review">进入复习中心 →</a></section></div>
   <div class="section-title"><h2>我的学科 <span class="sub"> / MY SUBJECTS</span></h2><a class="text-button" href="#subjects">管理学科 ↗</a></div><div class="subjects">${subjectCards()||`<button class="add-subject-card" data-add="subjects"><span>＋</span><strong>添加你的第一门课</strong><small>建立专属的 HL / SL 学科空间</small></button>`}</div>
   ${studyDashboard()}<section class="panel"><div class="panel-head"><h2>最近 7 天的积累</h2><span class="sub">${weekMinutes} 分钟</span></div>${weekChart()}</section>`;
